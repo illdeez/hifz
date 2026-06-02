@@ -28,7 +28,7 @@ export default function SurahDetailPage({ params }: { params: Promise<{ surahId:
 
   if (!surahMeta) {
     return (
-      <div className="page">
+      <div className="overlay">
         <PageHeader title="المصحف" backHref="/mushaf" />
         <p style={{ color: "var(--ink-muted)", fontSize: 14, padding: "20px" }}>السورة غير موجودة.</p>
       </div>
@@ -94,223 +94,224 @@ export default function SurahDetailPage({ params }: { params: Promise<{ surahId:
   }, [surahId])
 
   return (
-    <div className="overlay" style={{ overflowY: "auto" }}>
+    // overlay has: position:fixed; inset:0; display:flex; flex-direction:column; overflow:hidden
+    <div className="overlay">
 
       <PageHeader title={`سورة ${surahMeta.name.replace(/^ٱل/, "ال")}`} backHref="/mushaf" />
 
-      {/* ── Surah title ──────────────────────────────── */}
-      <div style={{ padding: "22px 20px 0" }}>
-        <SurahBand name={surahMeta.name} meta={`${surahMeta.ayahCount} آية`} />
-      </div>
+      {/* ── Scrollable body — grows to fill, scrolls only when needed ── */}
+      <div className="scrollbar-none" style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
 
-      {/* ── Progress hero ────────────────────────────── */}
-      <div style={{
-        padding: "30px 20px 0",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-      }}>
-        {/* Ring */}
-        <Ring value={coverageRatio} size={132} sw={9} color={ringColor}>
-          <div style={{ textAlign: "center" }}>
+        {/* Surah title band */}
+        <div style={{ padding: "16px 20px 0" }}>
+          <SurahBand name={surahMeta.name} meta={`${surahMeta.ayahCount} آية`} />
+        </div>
+
+        {/* Progress ring — reduced from 132→96 px */}
+        <div style={{
+          padding: "18px 20px 0",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+        }}>
+          <Ring value={coverageRatio} size={96} sw={7} color={ringColor}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{
+                fontFamily: "var(--serif)",
+                fontSize: 22,
+                fontWeight: 600,
+                color: "var(--ink)",
+                lineHeight: 1,
+              }}>
+                {formatNumberAr(coveragePercent)}
+                <span style={{ fontSize: 11 }}>٪</span>
+              </div>
+            </div>
+          </Ring>
+
+          {/* Count + status */}
+          <div style={{ marginTop: 12, textAlign: "center" }}>
             <div style={{
               fontFamily: "var(--serif)",
-              fontSize: 28,
+              fontSize: 19,
               fontWeight: 600,
               color: "var(--ink)",
-              lineHeight: 1,
             }}>
-              {formatNumberAr(coveragePercent)}
-              <span style={{ fontSize: 13 }}>٪</span>
+              {formatNumberAr(memorizedAyahs)} من {formatNumberAr(surahMeta.ayahCount)} آية
+            </div>
+            <div style={{ fontSize: 12, color: "var(--ink-muted)", marginTop: 4 }}>
+              {statusText}
             </div>
           </div>
-        </Ring>
 
-        {/* Count + status */}
-        <div style={{ marginTop: 18, textAlign: "center" }}>
+          {/* Ornament divider */}
           <div style={{
-            fontFamily: "var(--serif)",
-            fontSize: 21,
-            fontWeight: 600,
-            color: "var(--ink)",
-          }}>
-            {formatNumberAr(memorizedAyahs)} من {formatNumberAr(surahMeta.ayahCount)} آية
-          </div>
-          <div style={{
-            fontSize: 12.5,
-            color: "var(--ink-muted)",
-            marginTop: 6,
-          }}>
-            {statusText}
-          </div>
-        </div>
-
-        {/* Ornament divider */}
-        <div style={{
-          marginTop: 26,
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          width: 160,
-        }}>
-          <div style={{
-            flex: 1, height: 1,
-            background: "linear-gradient(90deg, transparent, var(--line-gold))",
-          }} />
-          <div style={{
-            width: 5, height: 5,
-            transform: "rotate(45deg)",
-            background: "var(--gold)",
-            opacity: 0.65,
-            flexShrink: 0,
-          }} />
-          <div style={{
-            flex: 1, height: 1,
-            background: "linear-gradient(270deg, transparent, var(--line-gold))",
-          }} />
-        </div>
-      </div>
-
-      {/* ── Stats row ────────────────────────────────── */}
-      <div style={{ padding: "20px 20px 0" }}>
-        <div
-          className="card"
-          style={{
+            marginTop: 18,
             display: "flex",
             alignItems: "center",
-            padding: "20px 0",
-          }}
-        >
-          <div style={{ flex: 1, textAlign: "center", padding: "0 22px" }}>
+            gap: 10,
+            width: 140,
+          }}>
             <div style={{
-              fontFamily: "var(--serif)",
-              fontSize: 28,
-              fontWeight: 600,
-              color: "var(--ink)",
-              lineHeight: 1,
-            }}>
-              {formatNumberAr(surahMeta.ayahCount)}
-            </div>
-            <div style={{ fontSize: 11.5, color: "var(--ink-muted)", marginTop: 6 }}>
-              عدد الآيات
-            </div>
+              flex: 1, height: 1,
+              background: "linear-gradient(90deg, transparent, var(--line-gold))",
+            }} />
+            <div style={{
+              width: 5, height: 5,
+              transform: "rotate(45deg)",
+              background: "var(--gold)",
+              opacity: 0.65,
+              flexShrink: 0,
+            }} />
+            <div style={{
+              flex: 1, height: 1,
+              background: "linear-gradient(270deg, transparent, var(--line-gold))",
+            }} />
           </div>
-          <div style={{ width: 1, height: 38, background: "var(--line-2)", flexShrink: 0 }} />
-          <div style={{ flex: 1, textAlign: "center", padding: "0 22px" }}>
-            <div style={{
-              fontFamily: "var(--serif)",
-              fontSize: 28,
-              fontWeight: 600,
-              color: "var(--ink)",
-              lineHeight: 1,
-            }}>
-              {formatNumberAr(segments.length)}
+        </div>
+
+        {/* Stats row */}
+        <div style={{ padding: "16px 20px 0" }}>
+          <div className="card" style={{ display: "flex", alignItems: "center", padding: "16px 0" }}>
+            <div style={{ flex: 1, textAlign: "center", padding: "0 22px" }}>
+              <div style={{
+                fontFamily: "var(--serif)",
+                fontSize: 26,
+                fontWeight: 600,
+                color: "var(--ink)",
+                lineHeight: 1,
+              }}>
+                {formatNumberAr(surahMeta.ayahCount)}
+              </div>
+              <div style={{ fontSize: 11.5, color: "var(--ink-muted)", marginTop: 5 }}>
+                عدد الآيات
+              </div>
             </div>
-            <div style={{ fontSize: 11.5, color: "var(--ink-muted)", marginTop: 6 }}>
-              المقاطع المحفوظة
+            <div style={{ width: 1, height: 34, background: "var(--line-2)", flexShrink: 0 }} />
+            <div style={{ flex: 1, textAlign: "center", padding: "0 22px" }}>
+              <div style={{
+                fontFamily: "var(--serif)",
+                fontSize: 26,
+                fontWeight: 600,
+                color: "var(--ink)",
+                lineHeight: 1,
+              }}>
+                {formatNumberAr(segments.length)}
+              </div>
+              <div style={{ fontSize: 11.5, color: "var(--ink-muted)", marginTop: 5 }}>
+                المقاطع المحفوظة
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* ── Upcoming reviews ─────────────────────────── */}
-      <div style={{ padding: "22px 20px 0" }}>
-        <div className="eyebrow" style={{ marginBottom: 10, padding: "0 2px" }}>المراجعات القادمة</div>
-        {upcomingReviews.length > 0 ? (
-          <div className="card" style={{ padding: "4px 18px" }}>
-            {upcomingReviews.map((segment, index) => (
-              <div key={segment.id}>
-                <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 2px" }}>
-                  <BucketDot bucket={(segment.bucket ?? "stable") as "overdue" | "due" | "threatened" | "stable"} />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontFamily: "var(--serif)", fontSize: 17, fontWeight: 600, color: "var(--ink)" }}>
-                      الآيات {formatNumberAr(segment.fromAyah)}–{formatNumberAr(segment.toAyah)}
-                    </div>
-                    <div style={{ fontSize: 11.5, color: "var(--ink-muted)", marginTop: 3 }}>
-                      {reviewRelativeLabel(segment.nextReview)}
+        {/* Upcoming reviews */}
+        <div style={{ padding: "16px 20px 0" }}>
+          <div className="eyebrow" style={{ marginBottom: 8, padding: "0 2px" }}>المراجعات القادمة</div>
+          {upcomingReviews.length > 0 ? (
+            <div className="card" style={{ padding: "4px 18px" }}>
+              {upcomingReviews.map((segment, index) => (
+                <div key={segment.id}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 2px" }}>
+                    <BucketDot bucket={(segment.bucket ?? "stable") as "overdue" | "due" | "threatened" | "stable"} />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontFamily: "var(--serif)", fontSize: 16, fontWeight: 600, color: "var(--ink)" }}>
+                        الآيات {formatNumberAr(segment.fromAyah)}–{formatNumberAr(segment.toAyah)}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: "var(--ink-muted)", marginTop: 2 }}>
+                        {reviewRelativeLabel(segment.nextReview)}
+                      </div>
                     </div>
                   </div>
+                  {index < upcomingReviews.length - 1 && <div className="hr" />}
                 </div>
-                {index < upcomingReviews.length - 1 && <div className="hr" />}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="well" style={{
-            padding: "18px 20px",
-            textAlign: "center",
-            color: "var(--ink-muted)",
-            fontSize: 13.5,
-            borderRadius: 18,
-          }}>
-            لا توجد مراجعات قادمة الآن
-          </div>
-        )}
-      </div>
+              ))}
+            </div>
+          ) : (
+            <div className="well" style={{
+              padding: "14px 18px",
+              textAlign: "center",
+              color: "var(--ink-muted)",
+              fontSize: 13,
+              borderRadius: 16,
+            }}>
+              لا توجد مراجعات قادمة الآن
+            </div>
+          )}
+        </div>
 
-      {/* ── Memorized segments ───────────────────────── */}
-      <div style={{ padding: "22px 20px 0" }}>
-        <div className="eyebrow" style={{ marginBottom: 10, padding: "0 2px" }}>المقاطع المحفوظة</div>
-        {segments.length > 0 ? (
-          <div className="card" style={{ padding: "4px 18px" }}>
-            {segments.map((seg, i) => (
-              <div key={seg.id}>
-                <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 2px" }}>
-                  <BucketDot bucket={(seg.bucket ?? "stable") as "overdue" | "due" | "threatened" | "stable"} />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontFamily: "var(--serif)", fontSize: 18, fontWeight: 600, color: "var(--ink)" }}>
-                      الآيات {formatNumberAr(seg.fromAyah)}–{formatNumberAr(seg.toAyah)}
+        {/* Memorized segments */}
+        <div style={{ padding: "16px 20px 0" }}>
+          <div className="eyebrow" style={{ marginBottom: 8, padding: "0 2px" }}>المقاطع المحفوظة</div>
+          {segments.length > 0 ? (
+            <div className="card" style={{ padding: "4px 18px" }}>
+              {segments.map((seg, i) => (
+                <div key={seg.id}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 2px" }}>
+                    <BucketDot bucket={(seg.bucket ?? "stable") as "overdue" | "due" | "threatened" | "stable"} />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontFamily: "var(--serif)", fontSize: 17, fontWeight: 600, color: "var(--ink)" }}>
+                        الآيات {formatNumberAr(seg.fromAyah)}–{formatNumberAr(seg.toAyah)}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: "var(--ink-muted)", marginTop: 2 }}>
+                        {BUCKET_LABEL[seg.bucket ?? "stable"] ?? ""} · {reviewRelativeLabel(seg.nextReview)}
+                        {seg.notes ? " · ✎" : ""}
+                      </div>
                     </div>
-                    <div style={{ fontSize: 11.5, color: "var(--ink-muted)", marginTop: 3 }}>
-                      {BUCKET_LABEL[seg.bucket ?? "stable"] ?? ""} · {reviewRelativeLabel(seg.nextReview)}
-                      {seg.notes ? " · ✎" : ""}
-                    </div>
+                    <button
+                      onClick={() => quickReview(seg.id, "good")}
+                      style={{
+                        width: 36, height: 36, borderRadius: 10,
+                        background: "var(--surface)", boxShadow: "inset 0 0 0 1px var(--line-2)",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        border: "none", cursor: "pointer", flexShrink: 0,
+                      }}
+                      title="مراجعة سريعة"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--ink-soft)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+                        <path d="M3.51 9a9 9 0 0114.36-3.36L23 10M1 14l5.13 4.36A9 9 0 0020.49 15"/>
+                      </svg>
+                    </button>
                   </div>
-                  <button
-                    onClick={() => quickReview(seg.id, "good")}
-                    style={{
-                      width: 38, height: 38, borderRadius: 11,
-                      background: "var(--surface)", boxShadow: "inset 0 0 0 1px var(--line-2)",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      border: "none", cursor: "pointer", flexShrink: 0,
-                    }}
-                    title="مراجعة سريعة"
-                  >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--ink-soft)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
-                      <path d="M3.51 9a9 9 0 0114.36-3.36L23 10M1 14l5.13 4.36A9 9 0 0020.49 15"/>
-                    </svg>
-                  </button>
+                  {seg.notes && (
+                    <div style={{
+                      fontSize: 12,
+                      color: "var(--ink-soft)",
+                      padding: "0 0 10px 22px",
+                      fontStyle: "italic",
+                    }}>
+                      {seg.notes}
+                    </div>
+                  )}
+                  {i < segments.length - 1 && <div className="hr" />}
                 </div>
-                {seg.notes && (
-                  <div style={{
-                    fontSize: 12.5,
-                    color: "var(--ink-soft)",
-                    padding: "0 0 12px 22px",
-                    fontStyle: "italic",
-                  }}>
-                    {seg.notes}
-                  </div>
-                )}
-                {i < segments.length - 1 && <div className="hr" />}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="well" style={{
-            padding: "22px",
-            textAlign: "center",
-            color: "var(--ink-muted)",
-            fontSize: 13.5,
-            borderRadius: 18,
-          }}>
-            لا مقاطع محفوظة في هذه السورة بعد
-          </div>
-        )}
+              ))}
+            </div>
+          ) : (
+            <div className="well" style={{
+              padding: "14px 18px",
+              textAlign: "center",
+              color: "var(--ink-muted)",
+              fontSize: 13,
+              borderRadius: 16,
+            }}>
+              لا مقاطع محفوظة في هذه السورة بعد
+            </div>
+          )}
+        </div>
+
+        {/* Bottom breathing room above the action bar */}
+        <div style={{ height: 16 }} />
       </div>
 
-      {/* ── Actions ──────────────────────────────────── */}
-      <div style={{ padding: "26px 20px 50px" }}>
+      {/* ── Pinned action bar — always visible at the bottom ─────── */}
+      <div style={{
+        padding: "12px 20px calc(env(safe-area-inset-bottom, 16px) + 10px)",
+        borderTop: "1px solid var(--line)",
+        background: "var(--paper)",
+        flexShrink: 0,
+      }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           <button
             type="button"
@@ -345,7 +346,7 @@ export default function SurahDetailPage({ params }: { params: Promise<{ surahId:
         )}
       </div>
 
-      {/* ── Add segment sheet ────────────────────────── */}
+      {/* ── Add segment sheet ────────────────────────────────────── */}
       {showAddSegment && (
         <div
           className="fixed inset-0 z-40 flex items-end"
