@@ -4,8 +4,9 @@ import { useEffect, useState } from "react"
 import { PageHeader } from "@/components/page-header"
 import { PlanBasketEditor } from "@/components/plan-basket-editor"
 import { TargetDateSheet } from "@/components/target-date-sheet"
+import { clampDailyPacePages, formatDailyPacePages } from "@/lib/pace-planner"
 import { useKunehStore } from "@/lib/store"
-import { formatDateAr, formatNumberAr } from "@/lib/utils"
+import { formatDateYearAr, formatNumberAr } from "@/lib/utils"
 
 export default function SettingsPage() {
   const {
@@ -19,6 +20,7 @@ export default function SettingsPage() {
   const [planEditorOpen, setPlanEditorOpen] = useState(false)
   const [planNameDraft, setPlanNameDraft] = useState("")
   const [goalOpen, setGoalOpen] = useState(false)
+  const [paceOpen, setPaceOpen] = useState(false)
 
   const settings = store.settings
   const canReset = resetText.trim() === "تصفير"
@@ -130,12 +132,28 @@ export default function SettingsPage() {
           <SettingsRow
             icon={
               <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--gold-deep)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 3v18"/><path d="M7 8c0-2 1.8-3.5 5-3.5s5 1.5 5 3.5-2 3-5 3-5 1-5 3 1.8 3.5 5 3.5 5-1.5 5-3.5"/>
+              </svg>
+            }
+            title="وتيرة الحفظ اليومية"
+            sub={formatDailyPacePages(settings.dailyPacePages)}
+            onClick={() => setPaceOpen(true)}
+            right={
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--ink-faint)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
+            }
+          />
+          <div className="hr" />
+          <SettingsRow
+            icon={
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--gold-deep)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
                 <rect x="4" y="5.5" width="16" height="15" rx="2.5"/>
                 <path d="M4 9.5h16M8.5 3.5v4M15.5 3.5v4"/>
               </svg>
             }
             title="هدف الإتمام"
-            sub={formatDateAr(settings.targetDate)}
+            sub={formatDateYearAr(settings.targetDate)}
             onClick={() => setGoalOpen(true)}
             right={
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--ink-faint)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
@@ -187,23 +205,18 @@ export default function SettingsPage() {
 
       {/* ── Plan editor — full-screen overlay ────────────── */}
       {planEditorOpen && plan && (
-        <div
-          className="overlay"
-          style={{ overflowY: "auto" }}
-        >
-          {/* Sticky header */}
+        <div className="overlay">
+          {/* Header — not scrollable */}
           <div style={{
-            position: "sticky", top: 0, zIndex: 10,
+            flexShrink: 0,
             background: "var(--paper)",
             borderBottom: "1px solid var(--line-2)",
             paddingTop: "env(safe-area-inset-top, 0px)",
           }}>
             <div style={{ height: 54, display: "flex", alignItems: "center", padding: "0 20px" }}>
-              {/* Title — right side (RTL start) */}
               <span style={{ fontFamily: "var(--serif)", fontSize: 18, fontWeight: 600, color: "var(--ink)" }}>
                 إدارة الخطة
               </span>
-              {/* Close button — pushed to left */}
               <button
                 onClick={() => setPlanEditorOpen(false)}
                 aria-label="إغلاق"
@@ -222,8 +235,8 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          {/* Scrollable content */}
-          <div style={{ padding: "20px 20px 140px" }}>
+          {/* Scrollable content — fills remaining height */}
+          <div className="scrollbar-none" style={{ flex: 1, overflowY: "auto", padding: "20px 20px 20px" }}>
             {/* Plan name field */}
             <div style={{ marginBottom: 20 }}>
               <div className="eyebrow" style={{ marginBottom: 10 }}>اسم الخطة</div>
@@ -256,13 +269,15 @@ export default function SettingsPage() {
               onAddSegmentTarget={addSegmentTargetToActivePlan}
               onRemoveSegmentTarget={removeSegmentTargetFromActivePlan}
             />
+            <div style={{ height: 8 }} />
           </div>
 
-          {/* Fixed bottom action bar */}
+          {/* Bottom action bar — pinned, NOT fixed */}
           <div style={{
-            position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 20,
-            padding: "16px 20px calc(env(safe-area-inset-bottom, 0px) + 16px)",
-            background: "linear-gradient(to top, var(--paper) 70%, transparent)",
+            flexShrink: 0,
+            padding: "14px 20px calc(env(safe-area-inset-bottom, 20px) + 14px)",
+            borderTop: "1px solid var(--line)",
+            background: "var(--paper)",
             display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10,
           }}>
             <button
@@ -294,6 +309,17 @@ export default function SettingsPage() {
           value={settings.targetDate}
           onClose={() => setGoalOpen(false)}
           onSave={(iso) => updateSettings({ ...settings, targetDate: iso })}
+        />
+      )}
+
+      {paceOpen && (
+        <DailyPaceSheet
+          value={settings.dailyPacePages}
+          onClose={() => setPaceOpen(false)}
+          onSave={(value) => {
+            updateSettings({ ...settings, dailyPacePages: clampDailyPacePages(value) })
+            setPaceOpen(false)
+          }}
         />
       )}
 
@@ -429,5 +455,97 @@ function Stepper({ value, unit, onChange, min, max }: { value: number; unit: str
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" strokeWidth={2.5} strokeLinecap="round"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
     </div>
+  )
+}
+
+function DailyPaceSheet({
+  value,
+  onClose,
+  onSave,
+}: {
+  value: number
+  onClose: () => void
+  onSave: (value: number) => void
+}) {
+  const presetMode = value === 0.5 ? "0.5" : value === 1 ? "1" : value === 2 ? "2" : "custom"
+  const [mode, setMode] = useState<"0.5" | "1" | "2" | "custom">(presetMode)
+  const [custom, setCustom] = useState(String(value))
+  const selected = mode === "custom" ? clampDailyPacePages(Number(custom) || 0.5) : Number(mode)
+
+  return (
+    <>
+      <div style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(23,18,13,.34)", backdropFilter: "blur(2px)" }} onClick={onClose} />
+      <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 61, background: "var(--surface)", borderRadius: "28px 28px 0 0", boxShadow: "0 -10px 40px -12px rgba(23,18,13,.4)", padding: "12px 20px calc(24px + env(safe-area-inset-bottom,0px))" }}>
+        <div style={{ width: 38, height: 5, borderRadius: 9, background: "var(--line-2)", margin: "0 auto 18px" }} />
+        <div style={{ fontFamily: "var(--serif)", fontSize: 21, fontWeight: 600, color: "var(--ink)", textAlign: "center", marginBottom: 8 }}>
+          وتيرة الحفظ اليومية
+        </div>
+        <p style={{ fontSize: 13, color: "var(--ink-muted)", textAlign: "center", lineHeight: 1.7, margin: "0 auto 16px", maxWidth: 300 }}>
+          اختر الوتيرة التي تناسبك، وسيعرض كُنه أثرها المتوقع على تاريخ الإنجاز.
+        </p>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          {[
+            { value: "0.5" as const, label: "نصف صفحة يوميًا" },
+            { value: "1" as const, label: "صفحة يوميًا" },
+            { value: "2" as const, label: "صفحتان يوميًا" },
+            { value: "custom" as const, label: "مخصص" },
+          ].map((option) => {
+            const isSelected = mode === option.value
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setMode(option.value)}
+                style={{
+                  minHeight: 48,
+                  borderRadius: 14,
+                  border: "none",
+                  background: isSelected ? "var(--ink)" : "var(--paper-deep)",
+                  color: isSelected ? "white" : "var(--ink-soft)",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  padding: "0 12px",
+                }}
+              >
+                {option.label}
+              </button>
+            )
+          })}
+        </div>
+
+        {mode === "custom" && (
+          <div style={{ marginTop: 12 }}>
+            <input
+              type="number"
+              min={0.25}
+              max={10}
+              step={0.25}
+              value={custom}
+              onChange={(event) => setCustom(event.target.value)}
+              style={{
+                width: "100%", height: 50, borderRadius: 14,
+                border: "1px solid var(--line-2)", background: "white",
+                fontFamily: "var(--serif)", fontSize: 18, fontWeight: 600,
+                color: "var(--ink)", padding: "0 14px", textAlign: "right", outline: "none",
+              }}
+            />
+            <p style={{ marginTop: 8, fontSize: 12, color: "var(--ink-muted)", lineHeight: 1.7 }}>
+              بين ربع صفحة و10 صفحات يوميًا، مع دعم الكسور مثل 0.25 و0.5 و0.75 و1.5.
+            </p>
+          </div>
+        )}
+
+        <div style={{ marginTop: 14, padding: "12px 14px", borderRadius: 14, background: "var(--paper-deep)", fontSize: 13.5, color: "var(--ink-soft)" }}>
+          وتيرتك الحالية: {formatDailyPacePages(selected)}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 14 }}>
+          <button type="button" className="btn btn-ghost" style={{ height: 48 }} onClick={onClose}>إلغاء</button>
+          <button type="button" className="btn btn-gold" style={{ height: 48 }} onClick={() => onSave(selected)}>حفظ الوتيرة</button>
+        </div>
+      </div>
+    </>
   )
 }
