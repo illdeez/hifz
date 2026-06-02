@@ -307,7 +307,7 @@ export default function SurahDetailPage({ params }: { params: Promise<{ surahId:
 
       {/* ── Pinned action bar — always visible at the bottom ─────── */}
       <div style={{
-        padding: "12px 20px calc(env(safe-area-inset-bottom, 16px) + 10px)",
+        padding: "12px 20px calc(env(safe-area-inset-bottom, 20px) + 20px)",
         borderTop: "1px solid var(--line)",
         background: "var(--paper)",
         flexShrink: 0,

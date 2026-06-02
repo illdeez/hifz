@@ -143,7 +143,7 @@ input, textarea, select {
 .page {
   min-height: 100dvh;
   /* design spec: .pad-nav { padding-bottom: 108px } */
-  padding-bottom: calc(108px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(118px + env(safe-area-inset-bottom, 0px));
 }
 
 @media (min-width: 640px) {
@@ -507,7 +507,7 @@ button:active {
   z-index: 50;
   width: min(100%, 430px);
   transform: translateX(-50%);
-  padding: 10px 14px calc(env(safe-area-inset-bottom, 16px) + 4px);
+  padding: 10px 14px calc(env(safe-area-inset-bottom, 20px) + 14px);
   background: linear-gradient(to top, var(--paper) 64%, rgba(241, 235, 223, 0) 100%);
   pointer-events: none;
 }
