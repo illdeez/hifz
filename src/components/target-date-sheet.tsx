@@ -8,8 +8,8 @@
  * Week starts Saturday. RTL-correct prev/next navigation.
  */
 
-import { useState } from "react"
-import { formatNumberAr } from "@/lib/utils"
+import { useMemo, useState } from "react"
+import { formatNumberAr, formatYearAr } from "@/lib/utils"
 
 const MONTHS = [
   "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
@@ -50,6 +50,10 @@ function toIso(d: Date): string {
   return d.toISOString().slice(0, 10)
 }
 
+function clampFutureDate(d: Date, min: Date): Date {
+  return d.getTime() < min.getTime() ? new Date(min) : d
+}
+
 const NAV_BTN: React.CSSProperties = {
   width: 36, height: 36, borderRadius: 10,
   background: "var(--paper-deep)",
@@ -65,13 +69,15 @@ interface Props {
 
 export function TargetDateSheet({ value, onClose, onSave }: Props) {
   const today = startOfDay(new Date())
-  const init = startOfDay(
+  const init = clampFutureDate(startOfDay(
     value ? new Date(value) : new Date(today.getTime() + 120 * 86400000),
-  )
+  ), today)
   const [sel, setSel] = useState<Date>(init)
   const [view, setView] = useState<Date>(
     new Date(init.getFullYear(), init.getMonth(), 1),
   )
+  const [yearPickerOpen, setYearPickerOpen] = useState(false)
+  const [monthPickerOpen, setMonthPickerOpen] = useState(false)
 
   const y = view.getFullYear()
   const m = view.getMonth()
@@ -85,20 +91,41 @@ export function TargetDateSheet({ value, onClose, onSave }: Props) {
 
   const isPast = (d: Date) => d.getTime() < today.getTime()
   const canPrev = new Date(y, m, 1) > new Date(today.getFullYear(), today.getMonth(), 1)
+  const isSelectedPast = isPast(sel)
 
   const monthsAway = monthsBetween(today, sel)
-  const fmtSel = `${formatNumberAr(sel.getDate())} ${MONTHS[sel.getMonth()]} ${formatNumberAr(sel.getFullYear())}`
+  const fmtSel = `${formatNumberAr(sel.getDate())} ${MONTHS[sel.getMonth()]} ${formatYearAr(sel.getFullYear())}`
+  const yearOptions = useMemo(() => Array.from({ length: 5 }, (_, index) => today.getFullYear() + index), [today])
 
   function jump(delta: number) { setView(new Date(y, m + delta, 1)) }
 
   function quick(months: number) {
     const d = startOfDay(new Date(today))
     d.setMonth(d.getMonth() + months)
-    setSel(d)
+    setSel(clampFutureDate(d, today))
     setView(new Date(d.getFullYear(), d.getMonth(), 1))
   }
 
+  function pickYear(nextYear: number) {
+    const nextMonth = view.getMonth()
+    const nextDay = Math.min(sel.getDate(), new Date(nextYear, nextMonth + 1, 0).getDate())
+    const nextDate = clampFutureDate(startOfDay(new Date(nextYear, nextMonth, nextDay)), today)
+    setSel(nextDate)
+    setView(new Date(nextDate.getFullYear(), nextDate.getMonth(), 1))
+    setYearPickerOpen(false)
+  }
+
+  function pickMonth(nextMonth: number) {
+    const nextYear = view.getFullYear()
+    const nextDay = Math.min(sel.getDate(), new Date(nextYear, nextMonth + 1, 0).getDate())
+    const nextDate = clampFutureDate(startOfDay(new Date(nextYear, nextMonth, nextDay)), today)
+    setSel(nextDate)
+    setView(new Date(nextDate.getFullYear(), nextDate.getMonth(), 1))
+    setMonthPickerOpen(false)
+  }
+
   function save() {
+    if (isSelectedPast) return
     onSave(toIso(sel))
     onClose()
   }
@@ -161,6 +188,7 @@ export function TargetDateSheet({ value, onClose, onSave }: Props) {
             const on = sameDay(d, sel)
             return (
               <button
+                type="button"
                 key={c.m}
                 className={`chip${on ? " is-on" : ""}`}
                 style={{ cursor: "pointer", height: 30, fontSize: 12.5, padding: "0 12px" }}
@@ -176,6 +204,7 @@ export function TargetDateSheet({ value, onClose, onSave }: Props) {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
           {/* Prev — visual right in RTL */}
           <button
+            type="button"
             style={{ ...NAV_BTN, opacity: canPrev ? 1 : 0.3, cursor: canPrev ? "pointer" : "default" }}
             onClick={() => canPrev && jump(-1)}
           >
@@ -184,18 +213,107 @@ export function TargetDateSheet({ value, onClose, onSave }: Props) {
             </svg>
           </button>
 
-          <div style={{ fontFamily: "var(--serif)", fontSize: 17, fontWeight: 600, color: "var(--ink)" }}>
-            {MONTHS[m]}{" "}
-            <span style={{ fontVariantNumeric: "tabular-nums" }}>{formatNumberAr(y)}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => setMonthPickerOpen((open) => !open)}
+              style={{
+                border: "none",
+                background: "var(--paper-deep)",
+                borderRadius: 11,
+                padding: "6px 12px",
+                fontFamily: "var(--serif)",
+                fontSize: 15,
+                fontWeight: 600,
+                color: "var(--ink)",
+                cursor: "pointer",
+              }}
+            >
+              {MONTHS[m]}
+            </button>
+            <button
+              type="button"
+              onClick={() => setYearPickerOpen((open) => !open)}
+              style={{
+                border: "none",
+                background: "var(--paper-deep)",
+                borderRadius: 11,
+                padding: "6px 12px",
+                fontFamily: "var(--serif)",
+                fontSize: 15,
+                fontWeight: 600,
+                color: "var(--ink)",
+                cursor: "pointer",
+              }}
+            >
+              {formatYearAr(y)}
+            </button>
           </div>
 
           {/* Next — visual left in RTL */}
-          <button style={NAV_BTN} onClick={() => jump(1)}>
+          <button type="button" style={NAV_BTN} onClick={() => jump(1)}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
               <polyline points="15 18 9 12 15 6" />
             </svg>
           </button>
         </div>
+
+        {monthPickerOpen && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 12 }}>
+            {MONTHS.map((monthName, monthIndex) => {
+              const selectedMonth = monthIndex === m
+              return (
+                <button
+                  key={monthName}
+                  type="button"
+                  onClick={() => pickMonth(monthIndex)}
+                  style={{
+                    minHeight: 40,
+                    borderRadius: 12,
+                    border: "none",
+                    cursor: "pointer",
+                    background: selectedMonth ? "linear-gradient(177deg,#BE9A5E,#A9824A)" : "var(--paper-deep)",
+                    color: selectedMonth ? "#231d12" : "var(--ink)",
+                    fontFamily: "var(--serif)",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    padding: "10px 8px",
+                  }}
+                >
+                  {monthName}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {yearPickerOpen && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 12 }}>
+            {yearOptions.map((year) => {
+              const selectedYear = year === y
+              return (
+                <button
+                  key={year}
+                  type="button"
+                  onClick={() => pickYear(year)}
+                  style={{
+                    height: 40,
+                    borderRadius: 12,
+                    border: "none",
+                    cursor: "pointer",
+                    background: selectedYear ? "linear-gradient(177deg,#BE9A5E,#A9824A)" : "var(--paper-deep)",
+                    color: selectedYear ? "#231d12" : "var(--ink)",
+                    fontFamily: "var(--serif)",
+                    fontSize: 15,
+                    fontWeight: 600,
+                  }}
+                >
+                  {formatYearAr(year)}
+                </button>
+              )
+            })}
+          </div>
+        )}
 
         {/* ── Weekday header ────────────────────────────────── */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 3 }}>
@@ -215,6 +333,7 @@ export function TargetDateSheet({ value, onClose, onSave }: Props) {
             const past = isPast(d)
             return (
               <button
+                type="button"
                 key={i}
                 disabled={past}
                 onClick={() => !past && setSel(d)}
@@ -244,12 +363,24 @@ export function TargetDateSheet({ value, onClose, onSave }: Props) {
           })}
         </div>
 
+        {isSelectedPast && (
+          <div style={{ marginTop: 12, textAlign: "center", fontSize: 12.5, color: "var(--due)", fontWeight: 600 }}>
+            اختر تاريخًا قادمًا لهدفك
+          </div>
+        )}
+
         {/* ── Actions ───────────────────────────────────────── */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 16 }}>
-          <button className="btn btn-ghost" style={{ fontSize: 14, height: 46 }} onClick={onClose}>
+          <button type="button" className="btn btn-ghost" style={{ fontSize: 14, height: 46 }} onClick={onClose}>
             إلغاء
           </button>
-          <button className="btn btn-gold" style={{ fontSize: 14, height: 46 }} onClick={save}>
+          <button
+            type="button"
+            className="btn btn-gold"
+            style={{ fontSize: 14, height: 46, opacity: isSelectedPast ? 0.55 : 1, cursor: isSelectedPast ? "default" : "pointer" }}
+            onClick={save}
+            disabled={isSelectedPast}
+          >
             تثبيت الهدف
           </button>
         </div>

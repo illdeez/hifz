@@ -46,6 +46,10 @@ export function formatNumberAr(value: number): string {
   return new Intl.NumberFormat("ar-SA").format(value)
 }
 
+export function formatYearAr(value: number): string {
+  return new Intl.NumberFormat("ar-SA", { useGrouping: false }).format(value)
+}
+
 export function toArabicNumeral(n: number): string {
   return formatNumberAr(n)
 }

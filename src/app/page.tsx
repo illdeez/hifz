@@ -27,7 +27,7 @@ import {
   withSessionNote,
   type TodaySessionState,
 } from "@/lib/session-state"
-import { daysUntil, formatDateAr, formatDateFullAr, formatNumberAr, reviewRelativeLabel, today } from "@/lib/utils"
+import { daysUntil, formatDateAr, formatDateFullAr, formatNumberAr, formatYearAr, reviewRelativeLabel, today } from "@/lib/utils"
 import type { EnrichedSegment, MemorizationPlan, PlanTargetSegment, Rating, SegmentDraft } from "@/lib/types"
 
 const RATING_OPTIONS: Array<{ value: Rating; label: string; hint: string; tone: Rating }> = [
@@ -410,6 +410,40 @@ export default function TodayPage() {
     setSelectedQuickOptionLabel(selectedLabel ?? null)
   }
 
+  // Derived data for the new HomeQuiet design
+  const ayatToday = useMemo(() => {
+    if (!todayLog || !todayLog.addedSegmentIds.length) return 0
+    return todayLog.addedSegmentIds.reduce((sum, id) => {
+      const seg = allSegments.find((s) => s.id === id)
+      return seg ? sum + (seg.toAyah - seg.fromAyah + 1) : sum
+    }, 0)
+  }, [todayLog, allSegments])
+
+  const ringRatio = store.settings.dailyMemorizationGoal > 0
+    ? Math.min(1, ayatToday / store.settings.dailyMemorizationGoal)
+    : 0
+
+  const heroTask = useMemo(() => {
+    if (!nextMemorizationGoal) return null
+    if (nextMemorizationGoal.type === "surah") {
+      const surah = getSurahMeta(nextMemorizationGoal.surahId)
+      return surah ? { surahName: surah.name, fromAyah: null as number | null, toAyah: null as number | null } : null
+    }
+    if (nextMemorizationGoal.type === "segment") {
+      const surah = getSurahMeta(nextMemorizationGoal.surahId)
+      return surah ? { surahName: surah.name, fromAyah: nextMemorizationGoal.fromAyah, toAyah: nextMemorizationGoal.toAyah } : null
+    }
+    if (nextMemorizationGoal.type === "juz") {
+      const firstRange = nextMemorizationGoal.ranges[0]
+      const firstSurahId = firstRange?.surahId ?? nextMemorizationGoal.surahIds[0]
+      const surah = getSurahMeta(firstSurahId)
+      return surah
+        ? { surahName: surah.name, fromAyah: firstRange?.fromAyah ?? null, toAyah: firstRange?.toAyah ?? null }
+        : null
+    }
+    return null
+  }, [nextMemorizationGoal])
+
   if (!store.activePlan) {
     return <HomeOnboardingGateway />
   }
@@ -474,36 +508,61 @@ export default function TodayPage() {
   }
 
   const dueCount = todayBuckets.overdue.length + todayBuckets.due.length
-  // Build the "today's task" centerpiece label
-  // For surah goals: "سورة الملك" / For juz goals: "الجزء ٣٠"
-  const todayTaskLabel = nextMemorizationGoal
-    ? nextMemorizationGoal.type === "surah"
-      ? "سورة " + nextMemorizationGoal.title.replace(/^ضمن سورة /, "")
-      : nextMemorizationGoal.title.replace(/^ضمن /, "")
-    : null
 
   return (
     <>
-      <div className="page">
-        <PageHeader title="اليوم" showBack={false} />
+      <div className="page scrollbar-none" style={{ overflowY: "auto" }}>
 
-        {/* ── Plan link + greeting ──────────────────────────── */}
-        <div className="rise" style={{ padding: "22px 24px 0" }}>
-          <Link href="/mushaf" style={{ display: "inline-flex", alignItems: "center", gap: 7, color: "var(--gold-deep)", marginBottom: 10 }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-              <path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/>
-            </svg>
-            <span style={{ fontSize: 12.5, fontWeight: 600 }}>{store.activePlan.name}</span>
+        {/* ── Home Header: greeting + hijri + ring ─────────────── */}
+        <div style={{
+          padding: `calc(env(safe-area-inset-top, 0px) + 14px) 22px 0`,
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <div>
+            <div className="eyebrow" style={{ marginBottom: 7, color: "var(--gold-deep)" }}>
+              {homeGreeting()}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--ink-muted)" }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gold-deep)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 13.5A7.5 7.5 0 0 1 10.5 5a6.5 6.5 0 1 0 8.5 8.5Z"/>
+              </svg>
+              <span style={{ fontSize: 12.5, fontWeight: 500 }}>{hijriDateLine()}</span>
+            </div>
+          </div>
+          <Link href="/settings" aria-label="الإعدادات" style={{ display: "block" }}>
+            <HomeProgressRing value={ringRatio} size={48} sw={3}>
+              <div style={{
+                width: 36, height: 36, borderRadius: "50%",
+                background: "var(--surface)", boxShadow: "inset 0 0 0 1px var(--line-2)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                <span style={{ fontFamily: "var(--serif)", fontSize: 17, fontWeight: 600, color: "var(--gold-deep)" }}>ع</span>
+              </div>
+            </HomeProgressRing>
           </Link>
-          <h1 style={{ margin: 0, fontFamily: "var(--serif)", fontSize: 32, fontWeight: 600, lineHeight: 1.28, color: "var(--ink)" }}>
+        </div>
+
+        {/* ── Greeting + plan chip ─────────────────────────────── */}
+        <div className="rise" style={{ padding: "22px 24px 0" }}>
+          <h1 style={{ margin: 0, fontFamily: "var(--serif)", fontSize: 31, fontWeight: 600, lineHeight: 1.26, color: "var(--ink)" }}>
             {hasCompletedTodaySession
               ? <>أتممت وِردَك اليوم،<br />جزاك الله خيرًا</>
               : <>أهلًا بعودتك،<br />إلى وِردك اليوم</>
             }
           </h1>
+          <Link href="/mushaf" style={{
+            display: "inline-flex", alignItems: "center", gap: 7, marginTop: 14,
+            padding: "8px 14px", borderRadius: 12, background: "var(--gold-soft)",
+            textDecoration: "none",
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gold-deep)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M7 4h10v16l-5-3.5L7 20Z"/>
+            </svg>
+            <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--gold-deep)" }}>{store.activePlan.name}</span>
+          </Link>
         </div>
 
-        {/* ── Today's task centerpiece ──────────────────────── */}
+        {/* ── Hero card — وِرد اليوم ────────────────────────────── */}
         <div className="rise" style={{ padding: "22px 20px 0", animationDelay: ".05s" }}>
           {hasCompletedTodaySession ? (
             <HomeCompletedCard
@@ -512,38 +571,8 @@ export default function TodayPage() {
               onExtraReview={startExtraReview}
               onExtraMemorize={startExtraMemorization}
             />
-          ) : nextMemorizationGoal ? (
-            <div className="card" style={{ padding: "22px 22px 20px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-                <span className="eyebrow" style={{ color: "var(--gold-deep)" }}>حفظ اليوم</span>
-                <span style={{ fontSize: 12.5, color: "var(--ink-muted)" }}>
-                  {nextMemorizationGoal.subtitle}
-                </span>
-              </div>
-              <div style={{ textAlign: "center", padding: "0 0 18px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "center", marginBottom: 6 }}>
-                  <div style={{ flex: 1, height: 1, background: "linear-gradient(to right, transparent, rgba(176,138,79,.4))" }} />
-                  <span style={{ fontFamily: "var(--serif)", fontSize: 24, fontWeight: 600, color: "var(--ink)" }}>
-                    {todayTaskLabel ?? nextMemorizationGoal.title}
-                  </span>
-                  <div style={{ flex: 1, height: 1, background: "linear-gradient(to left, transparent, rgba(176,138,79,.4))" }} />
-                </div>
-                <div style={{ fontSize: 13, color: "var(--ink-muted)", marginTop: 4 }}>
-                  {dueCount > 0 && (
-                    <span>+ {dueCount} مقاطع للمراجعة</span>
-                  )}
-                </div>
-              </div>
-              <button
-                className="btn btn-gold btn-lg btn-block"
-                onClick={startSession}
-              >
-                <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor">
-                  <polygon points="5,3 19,12 5,21"/>
-                </svg>
-                ابدأ جلسة اليوم
-              </button>
-            </div>
+          ) : heroTask ? (
+            <WardCard task={heroTask} dueCount={dueCount} onSession={startSession} />
           ) : (
             <div className="card" style={{ padding: "28px 24px", textAlign: "center" }}>
               <div style={{ width: 48, height: 48, borderRadius: "50%", background: "var(--verdant-soft)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
@@ -556,38 +585,42 @@ export default function TodayPage() {
           )}
         </div>
 
-        {/* ── Review — single calm row ──────────────────────── */}
-        <Link href="/review" style={{ display: "block", width: "100%", textAlign: "inherit", padding: "22px 24px 4px", textDecoration: "none" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <div style={{
-              width: 46, height: 46, borderRadius: 14, flexShrink: 0,
-              background: dueCount > 0 ? "var(--due-soft)" : "var(--verdant-soft)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-            }}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={dueCount > 0 ? "var(--due)" : "var(--verdant)"} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
-                <path d="M3.51 9a9 9 0 0114.36-3.36L23 10M1 14l5.13 4.36A9 9 0 0020.49 15"/>
-              </svg>
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 15.5, fontWeight: 600, color: "var(--ink)" }}>
-                {dueCount > 0 ? `${dueCount} مقاطع للمراجعة اليوم` : "لا مراجعات مستحقّة اليوم"}
-              </div>
-              <div style={{ fontSize: 13, color: "var(--ink-muted)", marginTop: 2 }}>
-                {dueCount > 0 ? "لتثبيت ما حفظت" : "حفظك مستقرّ، الحمد لله"}
-              </div>
-            </div>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--ink-faint)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="15,18 9,12 15,6" style={{ transform: "scaleX(-1)", transformOrigin: "center" }}/>
-            </svg>
-          </div>
-        </Link>
+        {/* ── Glance row ──────────────────────────────────────── */}
+        <div className="rise" style={{ padding: "14px 20px 0", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, animationDelay: ".08s" }}>
+          <GlanceTile
+            icon="spark" tone="gold"
+            big={ayatToday}
+            label="حُفظ اليوم"
+            sub={`من ${formatNumberAr(store.settings.dailyMemorizationGoal)} آيات`}
+            onClick={startExtraMemorization}
+          />
+          <GlanceTile
+            icon="repeat" tone="due"
+            big={dueCount}
+            label="مراجعة اليوم"
+            sub={dueCount > 0 ? "تحتاج تثبيتًا" : "مستقرّ"}
+            onClick={() => router.push("/review")}
+          />
+        </div>
 
-        {/* ── Plan progress bar ─────────────────────────────── */}
-        <div style={{ padding: "18px 24px 0" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+        {/* ── Goal countdown ───────────────────────────────────── */}
+        <div className="rise" style={{ padding: "18px 20px 0", animationDelay: ".12s" }}>
+          <div className="eyebrow" style={{ marginBottom: 12, padding: "0 4px" }}>المسير حتى الهدف</div>
+          <GoalCountdownCard
+            daysLeft={store.settings.targetDate ? Math.max(1, daysLeft) : null}
+            targetDate={store.settings.targetDate}
+            planCreatedAt={store.activePlan.createdAt}
+            onSetGoal={() => router.push("/settings")}
+          />
+        </div>
+
+        {/* ── Plan progress strip ──────────────────────────────── */}
+        <div className="rise" style={{ padding: "18px 24px 0", animationDelay: ".16s" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 9 }}>
             <span style={{ fontSize: 13, color: "var(--ink-muted)", fontWeight: 500 }}>تقدّم الخطة</span>
-            <span style={{ fontSize: 13, color: "var(--gold-deep)", fontWeight: 600 }}>{planProgress.planCompletionPercent}٪</span>
+            <span style={{ fontFamily: "var(--serif)", fontSize: 16, fontWeight: 600, color: "var(--gold-deep)" }}>
+              {formatNumberAr(planProgress.planCompletionPercent)}٪
+            </span>
           </div>
           <HomePlanBar value={planProgress.planCompletionPercent / 100} />
         </div>
@@ -595,33 +628,28 @@ export default function TodayPage() {
         <div style={{ height: 100 }} />
       </div>
 
-      {!hasCompletedTodaySession && (
-        <>
-          {/* ── FAB: quick log memorization ───────────────────── */}
-          <button
-            className="press"
-            onClick={startExtraMemorization}
-            style={{
-              position: "fixed",
-              bottom: "calc(90px + env(safe-area-inset-bottom, 0px))",
-              insetInlineStart: 20,
-              zIndex: 38,
-              height: 52, paddingInline: 18,
-              borderRadius: 17,
-              display: "flex", alignItems: "center", gap: 9,
-              background: "linear-gradient(177deg, #BE9A5E, #A9824A)",
-              color: "#231d12", fontWeight: 600, fontSize: 14,
-              boxShadow: "0 2px 6px rgba(142,108,57,.3), 0 14px 28px -10px rgba(142,108,57,.55)",
-              border: "none", cursor: "pointer", fontFamily: "inherit",
-            }}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round">
-              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-            </svg>
-            سجّل حفظًا
-          </button>
-        </>
-      )}
+      {/* ── FAB: quick log memorization ─────────────────────── */}
+      <button
+        className="press"
+        onClick={startExtraMemorization}
+        style={{
+          position: "fixed",
+          bottom: "calc(90px + env(safe-area-inset-bottom, 0px))",
+          insetInlineStart: 20,
+          zIndex: 38,
+          height: 52, paddingInline: 18, borderRadius: 17,
+          display: "flex", alignItems: "center", gap: 9,
+          background: "linear-gradient(177deg, #BE9A5E, #A9824A)",
+          color: "#231d12", fontWeight: 600, fontSize: 14,
+          boxShadow: "0 2px 6px rgba(142,108,57,.3), 0 14px 28px -10px rgba(142,108,57,.55)",
+          border: "none", cursor: "pointer", fontFamily: "inherit",
+        }}
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round">
+          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+        سجّل حفظًا
+      </button>
 
       {reviewPickerOpen && (
         <ReviewPicker
@@ -678,6 +706,255 @@ function HomeCompletedCard({
         >
           حفظ إضافي
         </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Home design components ───────────────────────────────────
+
+/** Time-of-day greeting in Arabic */
+function homeGreeting(): string {
+  const h = new Date().getHours()
+  if (h < 5)  return "سحرٌ مبارك"
+  if (h < 12) return "صباح النور"
+  if (h < 17) return "نهارٌ مبارك"
+  if (h < 20) return "مساء النور"
+  return "ليلةٌ مباركة"
+}
+
+/** Today's Hijri date as a one-line string */
+function hijriDateLine(): string {
+  try {
+    const now = new Date()
+    const d = now.toLocaleDateString("ar-SA-u-ca-islamic", { day: "numeric" })
+    const m = now.toLocaleDateString("ar-SA-u-ca-islamic", { month: "long" })
+    const y = now.toLocaleDateString("ar-SA-u-ca-islamic", { year: "numeric" })
+    return `${d} ${m} · ${y}`
+  } catch {
+    return ""
+  }
+}
+
+/** Circular progress ring — same geometry as the design's Ring component */
+function HomeProgressRing({
+  value, size, sw, children,
+}: { value: number; size: number; sw: number; children: React.ReactNode }) {
+  const r = (size - sw) / 2
+  const c = 2 * Math.PI * r
+  const off = c * (1 - Math.max(0, Math.min(1, value)))
+  return (
+    <div style={{ position: "relative", width: size, height: size }}>
+      <svg width={size} height={size} style={{ transform: "rotate(-90deg) scaleX(-1)" }}>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--paper-deep)" strokeWidth={sw} />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--gold)" strokeWidth={sw}
+          strokeDasharray={c} strokeDashoffset={off} strokeLinecap="round"
+          style={{ transition: "stroke-dashoffset 1.1s cubic-bezier(.2,.7,.3,1)" }}
+        />
+      </svg>
+      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+/** Hero card for today's ward — surah band + HeroCell ayah range + CTA */
+function WardCard({
+  task, dueCount, onSession,
+}: {
+  task: { surahName: string; fromAyah: number | null; toAyah: number | null }
+  dueCount: number
+  onSession: () => void
+}) {
+  const ayahCount = task.fromAyah != null && task.toAyah != null
+    ? task.toAyah - task.fromAyah + 1
+    : null
+  const cleanName = task.surahName.replace(/^ٱل/, "ال")
+
+  return (
+    <div className="card" style={{ padding: "24px 24px 22px" }}>
+      {/* Header row */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+        <span className="eyebrow" style={{ color: "var(--gold-deep)" }}>وِرد اليوم</span>
+        {dueCount > 0 && (
+          <span style={{ fontSize: 12.5, color: "var(--ink-muted)" }}>
+            + {formatNumberAr(dueCount)} للمراجعة
+          </span>
+        )}
+      </div>
+
+      {/* Surah band */}
+      <div style={{ display: "flex", alignItems: "center", gap: 14, justifyContent: "center", padding: "6px 0" }}>
+        <span style={{ flex: 1, height: 1, background: "linear-gradient(to right, transparent, rgba(176,138,79,.4))" }} />
+        <span style={{ width: 6, height: 6, transform: "rotate(45deg)", background: "var(--gold)", opacity: 0.7, display: "inline-block", flexShrink: 0 }} />
+        <span style={{ fontFamily: "var(--serif)", fontSize: 26, fontWeight: 600, color: "var(--ink)" }}>
+          سورة {cleanName}
+        </span>
+        <span style={{ width: 6, height: 6, transform: "rotate(45deg)", background: "var(--gold)", opacity: 0.7, display: "inline-block", flexShrink: 0 }} />
+        <span style={{ flex: 1, height: 1, background: "linear-gradient(to left, transparent, rgba(176,138,79,.4))" }} />
+      </div>
+
+      {/* HeroCells */}
+      {ayahCount != null && task.fromAyah != null && task.toAyah != null && (
+        <div className="well" style={{ display: "flex", marginTop: 20, overflow: "hidden" }}>
+          <div style={{ flex: 1, padding: "15px 12px", textAlign: "center" }}>
+            <div style={{ fontSize: 11.5, color: "var(--ink-muted)", marginBottom: 6 }}>الآيات الجديدة</div>
+            <div style={{ fontFamily: "var(--serif)", fontSize: 22, fontWeight: 600, color: "var(--ink)", lineHeight: 1, whiteSpace: "nowrap" }}>
+              {formatNumberAr(task.fromAyah)} – {formatNumberAr(task.toAyah)}
+            </div>
+          </div>
+          <div style={{ width: 1, background: "var(--line-2)" }} />
+          <div style={{ flex: 1, padding: "15px 12px", textAlign: "center" }}>
+            <div style={{ fontSize: 11.5, color: "var(--ink-muted)", marginBottom: 6 }}>المقدار</div>
+            <div style={{ fontFamily: "var(--serif)", fontSize: 22, fontWeight: 600, color: "var(--ink)", lineHeight: 1 }}>
+              {formatNumberAr(ayahCount)} آيات
+            </div>
+          </div>
+        </div>
+      )}
+
+      <button className="btn btn-gold btn-lg btn-block" style={{ marginTop: 18 }} onClick={onSession}>
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor">
+          <polygon points="5,3 19,12 5,21" />
+        </svg>
+        ابدأ جلسة اليوم
+      </button>
+    </div>
+  )
+}
+
+/** 2-stat glance tile used in the two-column row */
+function GlanceTile({
+  icon, tone, big, label, sub, onClick,
+}: {
+  icon: "spark" | "repeat"
+  tone: "gold" | "due"
+  big: number
+  label: string
+  sub: string
+  onClick?: () => void
+}) {
+  const col = tone === "due" ? "var(--due)" : "var(--gold-deep)"
+
+  const iconEl = icon === "spark" ? (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={col} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 4c.4 3.7 1.3 4.6 5 5-3.7.4-4.6 1.3-5 5-.4-3.7-1.3-4.6-5-5 3.7-.4 4.6-1.3 5-5Z"/>
+    </svg>
+  ) : (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={col} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 4l3 3-3 3"/><path d="M20 7H8a4 4 0 0 0-4 4v1"/>
+      <path d="M7 20l-3-3 3-3"/><path d="M4 17h12a4 4 0 0 0 4-4v-1"/>
+    </svg>
+  )
+
+  return (
+    <button
+      className="card press"
+      onClick={onClick}
+      style={{ padding: 16, textAlign: "inherit", display: "block", width: "100%", cursor: onClick ? "pointer" : "default" }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        {iconEl}
+        <span style={{ fontFamily: "var(--serif)", fontSize: 26, fontWeight: 600, color: "var(--ink)" }}>
+          {formatNumberAr(big)}
+        </span>
+      </div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)", marginTop: 10 }}>{label}</div>
+      <div style={{ fontSize: 11.5, color: "var(--ink-muted)", marginTop: 2 }}>{sub}</div>
+    </button>
+  )
+}
+
+/** Goal countdown card — big days-left number + elapsed progress bar */
+const GREG_MO_AR = ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"]
+
+function GoalCountdownCard({
+  daysLeft, targetDate, planCreatedAt, onSetGoal,
+}: {
+  daysLeft: number | null
+  targetDate: string
+  planCreatedAt: string
+  onSetGoal: () => void
+}) {
+  if (!daysLeft || !targetDate) {
+    return (
+      <button
+        className="card press"
+        onClick={onSetGoal}
+        style={{ width: "100%", textAlign: "inherit", padding: "20px 22px", display: "flex", alignItems: "center", gap: 14 }}
+      >
+        <div style={{ width: 44, height: 44, borderRadius: 13, background: "var(--gold-soft)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--gold-deep)" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1.4" fill="var(--gold-deep)" stroke="none"/>
+          </svg>
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontFamily: "var(--serif)", fontSize: 17, fontWeight: 600, color: "var(--ink)" }}>حدِّد هدف الإتمام</div>
+          <div style={{ fontSize: 12.5, color: "var(--ink-muted)", marginTop: 2 }}>لتتابع عدّ أيامك حتى الختمة</div>
+        </div>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--ink-faint)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+          <path d="M14 6l-6 6 6 6"/>
+        </svg>
+      </button>
+    )
+  }
+
+  const td = new Date(targetDate + "T12:00:00")
+  const dateLine = `${formatNumberAr(td.getDate())} ${GREG_MO_AR[td.getMonth()]} ${formatYearAr(td.getFullYear())}`
+  const months = Math.floor(daysLeft / 30)
+  const remDays = daysLeft % 30
+
+  const startMs = new Date(planCreatedAt + "T12:00:00").getTime()
+  const endMs = td.getTime()
+  const span = Math.max(1, endMs - startMs)
+  const elapsed = Math.min(1, Math.max(0, (Date.now() - startMs) / span))
+
+  const daysWord = daysLeft === 1 ? "يوم" : daysLeft === 2 ? "يومان" : "يومًا"
+  const breakdown = months > 0
+    ? `${formatNumberAr(months)} ${months === 1 ? "شهر" : months === 2 ? "شهرين" : "أشهر"}${remDays > 0 ? ` و${formatNumberAr(remDays)} ${remDays === 1 ? "يوم" : remDays === 2 ? "يومين" : "يومًا"}` : ""}`
+    : "أقلّ من شهر"
+
+  return (
+    <div className="card" style={{ padding: "22px 24px", position: "relative", overflow: "hidden" }}>
+      {/* Radial glow accent */}
+      <div style={{ position: "absolute", top: -30, insetInlineEnd: -24, width: 120, height: 120, borderRadius: "50%", background: "radial-gradient(circle, var(--gold-soft), transparent 70%)", pointerEvents: "none" }} />
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, position: "relative" }}>
+        <span className="eyebrow" style={{ color: "var(--gold-deep)" }}>حتى هدفك</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--ink-muted)" }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gold-deep)" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1.4" fill="var(--gold-deep)" stroke="none"/>
+          </svg>
+          {dateLine}
+        </span>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, position: "relative" }}>
+        <span style={{ fontFamily: "var(--serif)", fontSize: 54, fontWeight: 600, color: "var(--ink)", lineHeight: 0.9 }}>
+          {formatNumberAr(daysLeft)}
+        </span>
+        <span style={{ fontSize: 16, fontWeight: 600, color: "var(--ink-soft)" }}>{daysWord}</span>
+      </div>
+      <div style={{ fontSize: 13, color: "var(--ink-muted)", marginTop: 6, position: "relative" }}>
+        أي ما يقارب {breakdown}
+      </div>
+
+      <div style={{ marginTop: 16, position: "relative" }}>
+        <div style={{ height: 5, borderRadius: 5, background: "var(--paper-deep)", overflow: "hidden" }}>
+          <div style={{
+            height: "100%",
+            width: `${Math.round(elapsed * 100)}%`,
+            background: "var(--gold)", borderRadius: 5,
+            transition: "width 1s cubic-bezier(.2,.7,.3,1)",
+          }} />
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 7 }}>
+          <span style={{ fontSize: 13, color: "var(--ink-muted)", fontWeight: 500 }}>بدأت المسير</span>
+          <span style={{ fontSize: 13, color: "var(--gold-deep)", fontWeight: 500 }}>
+            {formatNumberAr(Math.round(elapsed * 100))}٪ من المدّة
+          </span>
+        </div>
       </div>
     </div>
   )
