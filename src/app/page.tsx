@@ -9,6 +9,7 @@ import { SegmentDraftForm, createInitialSegmentDraft } from "@/components/segmen
 import {
   buildPacePlanSummary,
   getDirectSurahAyahQuickCounts,
+  getMemorizationMode,
   isShortSurahPlan,
   resolveMemorizationEntryGoalUnit,
 } from "@/lib/pace-planner"
@@ -1354,6 +1355,27 @@ function describeFullAyahShortcut(goal: NewSegmentGoal, targetSurahId: number | 
   return goal.type === "segment" ? "حفظت المتبقي من المقطع" : `حفظت المتبقي من ${label}`
 }
 
+function describeMediumFractionShortcut(
+  goal: NewSegmentGoal,
+  targetSurahId: number | null,
+  draft: SegmentDraft | null,
+  fraction: "quarter" | "half"
+): string {
+  const label = getGoalObjectLabel(goal, targetSurahId)
+  const range = targetSurahId ? getGoalRange(goal, targetSurahId) : null
+  const fractionLabel = fraction === "quarter" ? "ربع" : "نصف"
+
+  if (!draft || !range) {
+    return `حفظت ${fractionLabel} ${label}`
+  }
+
+  if (draft.fromAyah > range.fromAyah) {
+    return `حفظت ${fractionLabel} ${label} التالي`
+  }
+
+  return `حفظت ${fractionLabel} ${label}`
+}
+
 function getPageSpanDraft(surahId: number, fromAyah: number, toAyah: number, pageCount: 1 | 2): SegmentDraft | null {
   const entries = getAyahEntriesForRange(surahId, fromAyah, toAyah)
   if (entries.length === 0) return null
@@ -1509,13 +1531,16 @@ function buildQuickRangeOptions(
 
   const remaining = getFirstUncoveredBlock(allSegments, range.surahId, range.fromAyah, range.toAyah)
   const suggestionStartAyah = remaining?.fromAyah ?? range.fromAyah
+  const memorizationMode =
+    goal.type === "segment" ? "long" : getMemorizationMode(targetSurahId)
 
-  if (goalUnit === "ayahs") {
+  if (memorizationMode === "short") {
     const fullRemainingDraft = remaining
       ? createSuggestedDraft(range.surahId, remaining.fromAyah, remaining.toAyah)
       : null
     const remainingAyahCount = remaining ? remaining.toAyah - remaining.fromAyah + 1 : 0
     const ayahCountDrafts = getDirectSurahAyahQuickCounts(entrySource, entrySurahId)
+      .filter((count) => remainingAyahCount > count && remainingAyahCount - count !== 1)
       .map((count) => ({
         count,
         draft: remaining && remainingAyahCount >= count ? getAyahCountDraft(range.surahId, remaining.fromAyah, remaining.toAyah, count) : null,
@@ -1535,6 +1560,60 @@ function buildQuickRangeOptions(
         hint: remaining ? `من الآية ${formatNumberAr(optionDraft.fromAyah)} إلى ${formatNumberAr(optionDraft.toAyah)}` : "إذا كان الهدف مكتملًا استخدم الخيار اليدوي",
         draft: optionDraft,
       })),
+      {
+        key: "goal-full-ayahs",
+        label: describeFullAyahShortcut(goal, targetSurahId, fullRemainingDraft),
+        hint: remaining ? `من الآية ${formatNumberAr(remaining.fromAyah)} إلى ${formatNumberAr(remaining.toAyah)}` : "هذا الهدف محفوظ حاليًا",
+        draft: fullRemainingDraft,
+      },
+      {
+        key: "goal-manual",
+        label: "اختيار آيات يدوي",
+        hint: "إذا كان حفظك اليوم يختلف عن هذا الاقتراح",
+        draft: { ...manualDraft },
+        tone: "manual" as const,
+      },
+    ]
+
+    return dedupeQuickOptions(quickOptions.filter((option) => option.draft !== null))
+  }
+
+  if (memorizationMode === "medium") {
+    const fullRemainingDraft = remaining
+      ? createSuggestedDraft(range.surahId, remaining.fromAyah, remaining.toAyah)
+      : null
+    const remainingAyahCount = remaining ? remaining.toAyah - remaining.fromAyah + 1 : 0
+    const totalAyahCount = range.toAyah - range.fromAyah + 1
+    const quarterCount = Math.max(1, Math.ceil(totalAyahCount / 4))
+    const halfCount = Math.max(1, Math.ceil(totalAyahCount / 2))
+    const quarterDraft =
+      remaining && remainingAyahCount > quarterCount
+        ? getAyahCountDraft(range.surahId, remaining.fromAyah, remaining.toAyah, quarterCount)
+        : null
+    const halfDraft =
+      remaining && remainingAyahCount > halfCount
+        ? getAyahCountDraft(range.surahId, remaining.fromAyah, remaining.toAyah, halfCount)
+        : null
+    const manualDraft = createSuggestedDraft(
+      range.surahId,
+      suggestionStartAyah,
+      suggestionStartAyah,
+      { memorization: draft.memorization, meaning: draft.meaning, notes: draft.notes ?? "" }
+    )
+
+    const quickOptions: QuickRangeOption[] = [
+      {
+        key: "goal-quarter-surah",
+        label: describeMediumFractionShortcut(goal, targetSurahId, quarterDraft, "quarter"),
+        hint: quarterDraft ? `من الآية ${formatNumberAr(quarterDraft.fromAyah)} إلى ${formatNumberAr(quarterDraft.toAyah)}` : "إذا كان المتبقي أقل من ربع السورة فاختر المتبقي أو يدوي",
+        draft: quarterDraft,
+      },
+      {
+        key: "goal-half-surah",
+        label: describeMediumFractionShortcut(goal, targetSurahId, halfDraft, "half"),
+        hint: halfDraft ? `من الآية ${formatNumberAr(halfDraft.fromAyah)} إلى ${formatNumberAr(halfDraft.toAyah)}` : "إذا كان المتبقي أقل من نصف السورة فاختر المتبقي أو يدوي",
+        draft: halfDraft,
+      },
       {
         key: "goal-full-ayahs",
         label: describeFullAyahShortcut(goal, targetSurahId, fullRemainingDraft),

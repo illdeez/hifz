@@ -5,6 +5,7 @@ import type { ActivePlan, HifzSegment } from "./types"
 import { addDays, daysBetween, today } from "./utils"
 
 export type PaceOption = 0.25 | 0.5 | 1 | 2
+export type MemorizationMode = "short" | "medium" | "long"
 
 export type PacePlanSummary = {
   goalUnit: "pages" | "ayahs"
@@ -22,10 +23,20 @@ export type PacePlanSummary = {
   onTrack: boolean
 }
 
-const SHORT_SURAH_IDS = new Set([93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114])
+const SHORT_SURAH_IDS = new Set([93, 94, 95, 97, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114])
+const MEDIUM_SURAH_MAX_AYAHS = 46
+
+export function getMemorizationMode(surahId: number): MemorizationMode {
+  if (SHORT_SURAH_IDS.has(surahId)) return "short"
+
+  const surah = getSurahMeta(surahId)
+  if (surah && surah.ayahCount <= MEDIUM_SURAH_MAX_AYAHS) return "medium"
+
+  return "long"
+}
 
 export function isShortSurahPlan(selectedSurahIds: number[]): boolean {
-  return selectedSurahIds.length > 0 && selectedSurahIds.every((surahId) => SHORT_SURAH_IDS.has(surahId))
+  return selectedSurahIds.length > 0 && selectedSurahIds.every((surahId) => getMemorizationMode(surahId) === "short")
 }
 
 export function resolveMemorizationEntryGoalUnit({
@@ -37,7 +48,7 @@ export function resolveMemorizationEntryGoalUnit({
   source: string | null
   surahId: number | null
 }): "pages" | "ayahs" {
-  if (source === "surah" && surahId && Number.isFinite(surahId) && isShortSurahPlan([surahId])) {
+  if (source === "surah" && surahId && Number.isFinite(surahId) && getMemorizationMode(surahId) === "short") {
     return "ayahs"
   }
 
@@ -45,7 +56,7 @@ export function resolveMemorizationEntryGoalUnit({
 }
 
 export function getDirectSurahAyahQuickCounts(source: string | null, surahId: number | null): number[] {
-  if (source === "surah" && surahId && Number.isFinite(surahId) && isShortSurahPlan([surahId])) {
+  if (source === "surah" && surahId && Number.isFinite(surahId) && getMemorizationMode(surahId) === "short") {
     return [2, 3]
   }
 

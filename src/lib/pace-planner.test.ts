@@ -4,6 +4,7 @@ import assert from "node:assert/strict"
 import {
   buildPacePlanSummary,
   getDirectSurahAyahQuickCounts,
+  getMemorizationMode,
   isShortSurahPlan,
   resolveMemorizationEntryGoalUnit,
 } from "./pace-planner"
@@ -107,8 +108,19 @@ test("pace planner uses only the remaining amount on the last day", () => {
 
 test("short surah plans use ayah-based goals only when all represented surahs are short", () => {
   assert.equal(isShortSurahPlan([112, 113, 114]), true)
+  assert.equal(isShortSurahPlan([93, 112]), true)
+  assert.equal(isShortSurahPlan([96]), false)
   assert.equal(isShortSurahPlan([67]), false)
   assert.equal(isShortSurahPlan([67, 112]), false)
+})
+
+test("memorization mode classifies short, medium, and long surahs correctly", () => {
+  assert.equal(getMemorizationMode(112), "short")
+  assert.equal(getMemorizationMode(93), "short")
+  assert.equal(getMemorizationMode(96), "medium")
+  assert.equal(getMemorizationMode(78), "medium")
+  assert.equal(getMemorizationMode(56), "long")
+  assert.equal(getMemorizationMode(18), "long")
 })
 
 test("pace planner switches to ayah mode for exclusively short-surah plans", () => {
