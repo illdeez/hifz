@@ -3,6 +3,8 @@ import assert from "node:assert/strict"
 
 import {
   buildPacePlanSummary,
+  clampDailyPacePages,
+  formatDailyPacePages,
   getDirectSurahAyahQuickCounts,
   getMemorizationMode,
   isShortSurahPlan,
@@ -55,6 +57,7 @@ test("pace planner calculates remaining pages, days needed, and finish date", ()
   assert.equal(summary.finishDate, "2026-06-05")
   assert.equal(summary.todayAmount, 0.5)
   assert.equal(summary.onTrack, true)
+  assert.equal(summary.goalUnit, "pages")
 })
 
 test("pace planner marks pace as behind when selected pace exceeds deadline", () => {
@@ -106,6 +109,19 @@ test("pace planner uses only the remaining amount on the last day", () => {
   assert.equal(summary.daysNeeded, 1)
 })
 
+test("page pace is clamped to a reasonable quarter-step range", () => {
+  assert.equal(clampDailyPacePages(0.1), 0.25)
+  assert.equal(clampDailyPacePages(20), 10)
+  assert.equal(clampDailyPacePages(0.74), 0.75)
+})
+
+test("daily page pace formatting uses calm human labels", () => {
+  assert.equal(formatDailyPacePages(0.25), "ربع صفحة يوميًا")
+  assert.equal(formatDailyPacePages(0.5), "نصف صفحة يوميًا")
+  assert.equal(formatDailyPacePages(1), "صفحة يوميًا")
+  assert.equal(formatDailyPacePages(1.5), "١٫٥ صفحة يوميًا")
+})
+
 test("short surah plans use ayah-based goals only when all represented surahs are short", () => {
   assert.equal(isShortSurahPlan([112, 113, 114]), true)
   assert.equal(isShortSurahPlan([93, 112]), true)
@@ -123,7 +139,7 @@ test("memorization mode classifies short, medium, and long surahs correctly", ()
   assert.equal(getMemorizationMode(18), "long")
 })
 
-test("pace planner switches to ayah mode for exclusively short-surah plans", () => {
+test("pace planner stays page-based even for exclusively short-surah plans", () => {
   const plan: ActivePlan = {
     id: "plan-4",
     name: "قصار السور",
@@ -142,10 +158,9 @@ test("pace planner switches to ayah mode for exclusively short-surah plans", () 
     todayDate: "2026-05-30",
   })
 
-  assert.equal(summary.goalUnit, "ayahs")
+  assert.equal(summary.goalUnit, "pages")
   assert.equal(summary.remainingAyahs, 15)
-  assert.equal(summary.remainingAmount, 15)
-  assert.equal(summary.daysNeeded, 3)
+  assert.equal(summary.remainingAmount, summary.remainingPages)
 })
 
 test("direct short-surah logging uses ayah entry context even when plan stays page-based", () => {

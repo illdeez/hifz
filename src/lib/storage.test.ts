@@ -27,3 +27,15 @@ test("normalizeStore upgrades older activePlan shapes to include targetJuz", () 
     updatedAt: "2026-05-30",
   })
 })
+
+test("normalizeStore fills dailyPacePages for older settings", () => {
+  const store = normalizeStore({
+    settings: {
+      dailyMemorizationGoal: 1,
+      dailyReviewGoal: 5,
+      targetDate: "2027-02-07",
+    },
+  })
+
+  assert.equal(store.settings.dailyPacePages, 0.5)
+})

@@ -34,6 +34,10 @@ export function formatDateAr(dateStr: string): string {
   })
 }
 
+export function formatDateYearAr(dateStr: string): string {
+  return `${formatDateAr(dateStr)} ${formatYearAr(parseDate(dateStr).getFullYear())}`
+}
+
 export function formatDateFullAr(dateStr: string): string {
   return parseDate(dateStr).toLocaleDateString("ar-SA", {
     weekday: "long",

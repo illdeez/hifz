@@ -2,18 +2,22 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useMemo, useState } from "react"
+import { type ReactNode, useMemo, useState } from "react"
+import { TargetDateSheet } from "@/components/target-date-sheet"
+import { buildPacePlanSummary, clampDailyPacePages, formatDailyPacePages } from "@/lib/pace-planner"
+import { getPlanPages } from "@/lib/page-coverage"
 import { JUZ, SURAHS, getSurahMeta } from "@/lib/quran-metadata"
 import { buildSelectedAyahRanges, formatSurahCoverageLabel, getSelectedAyahCount, getSelectedSurahCount, getSurahSelectionState } from "@/lib/plan-selection"
 import { useKunehStore } from "@/lib/store"
-import { formatDateFullAr, formatNumberAr, today } from "@/lib/utils"
+import { daysBetween, formatDateFullAr, formatDateYearAr, formatNumberAr, today } from "@/lib/utils"
 import type { PlanTargetSegment, SegmentDraft } from "@/lib/types"
 
 type Tab = "juz" | "surah" | "segment"
+type OnboardingStep = "content" | "target-date" | "daily-pace" | "summary"
 
 export default function OnboardingPage() {
   const router = useRouter()
-  const { store, setActivePlan } = useKunehStore()
+  const { store, setActivePlan, updateSettings } = useKunehStore()
 
   const [planName, setPlanName] = useState("خطة المرحلة الحالية")
   const [draft, setDraft] = useState<{
@@ -26,6 +30,11 @@ export default function OnboardingPage() {
     targetSegments: [],
   })
   const [tab, setTab] = useState<Tab>("juz")
+  const [step, setStep] = useState<OnboardingStep>("content")
+  const [goalOpen, setGoalOpen] = useState(false)
+  const [targetDate, setTargetDate] = useState(store.settings.targetDate)
+  const [paceMode, setPaceMode] = useState<"0.5" | "1" | "2" | "custom">("0.5")
+  const [customPace, setCustomPace] = useState(`${store.settings.dailyPacePages ?? 0.5}`)
   const [segDraft, setSegDraft] = useState<SegmentDraft>({
     surahId: 67, fromAyah: 1, toAyah: 10, memorization: 1, meaning: 1, notes: "",
   })
@@ -35,6 +44,47 @@ export default function OnboardingPage() {
   const canCreate = goalsCount > 0
   const totalAyahs = useMemo(() => getSelectedAyahCount(selectedAyahRanges), [selectedAyahRanges])
   const selectedSurahCount = useMemo(() => getSelectedSurahCount(selectedAyahRanges), [selectedAyahRanges])
+  const selectedDailyPacePages = useMemo(
+    () => (paceMode === "custom" ? clampDailyPacePages(Number(customPace) || 0.5) : Number(paceMode)),
+    [customPace, paceMode]
+  )
+  const draftPlan = useMemo(
+    () => ({
+      id: "draft-plan",
+      name: planName.trim() || "خطة المرحلة الحالية",
+      targetJuz: draft.targetJuz,
+      targetSurahs: draft.targetSurahs,
+      targetSegments: draft.targetSegments,
+      createdAt: today(),
+      updatedAt: today(),
+    }),
+    [draft, planName]
+  )
+  const totalPages = useMemo(() => getPlanPages(draftPlan).length, [draftPlan])
+  const summary = useMemo(
+    () =>
+      buildPacePlanSummary({
+        activePlan: draftPlan,
+        segments: [],
+        targetDate,
+        dailyPace: selectedDailyPacePages,
+      }),
+    [draftPlan, selectedDailyPacePages, targetDate]
+  )
+  const afterTargetDays = useMemo(
+    () => Math.max(0, daysBetween(targetDate, summary.finishDate)),
+    [summary.finishDate, targetDate]
+  )
+  const summaryContentItems = useMemo(() => {
+    const items: string[] = []
+    draft.targetJuz.forEach((id) => items.push(`الجزء ${formatNumberAr(id)}`))
+    draft.targetSurahs.forEach((id) => items.push(SURAHS.find((surah) => surah.id === id)?.name ?? `${id}`))
+    draft.targetSegments.forEach((segment) => {
+      const name = SURAHS.find((surah) => surah.id === segment.surahId)?.name ?? `${segment.surahId}`
+      items.push(`${name} ${formatNumberAr(segment.fromAyah)}–${formatNumberAr(segment.toAyah)}`)
+    })
+    return items
+  }, [draft])
 
   // ── Already has plan ─────────────────────────────────────────
   if (store.activePlan) {
@@ -102,6 +152,11 @@ export default function OnboardingPage() {
   }
   function handleCreate() {
     if (!canCreate) return
+    updateSettings({
+      ...store.settings,
+      targetDate,
+      dailyPacePages: selectedDailyPacePages,
+    })
     setActivePlan({
       id: "active-plan",
       name: planName.trim() || "خطة المرحلة الحالية",
@@ -111,6 +166,183 @@ export default function OnboardingPage() {
       createdAt: today(), updatedAt: today(),
     })
     router.push("/")
+  }
+
+  if (step === "target-date") {
+    return (
+      <div className="page" style={{ padding: "0 20px" }}>
+        <div style={{ padding: "22px 2px 20px" }}>
+          <div className="eyebrow" style={{ marginBottom: 6 }}>{formatDateFullAr(today())}</div>
+          <h1 style={{ fontFamily: "var(--serif)", fontSize: 27, fontWeight: 700, color: "var(--ink)", lineHeight: 1.3, marginBottom: 10 }}>
+            متى تبي تخلص الخطة؟
+          </h1>
+          <p style={{ fontSize: 13.5, lineHeight: 1.85, color: "var(--ink-muted)", maxWidth: "34ch" }}>
+            اختر تاريخًا قادمًا لهدفك، ثم نُظهر لك أثره على الوتيرة التي تناسبك.
+          </p>
+        </div>
+
+        <div className="card" style={{ padding: "22px 20px" }}>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>هدف الإتمام</div>
+          <button
+            type="button"
+            onClick={() => setGoalOpen(true)}
+            className="btn btn-ghost btn-block"
+            style={{ justifyContent: "space-between", height: 52 }}
+          >
+            <span>{formatDateYearAr(targetDate)}</span>
+            <span>اختر التاريخ</span>
+          </button>
+        </div>
+
+        <StepActions
+          backLabel="رجوع إلى محتوى الخطة"
+          nextLabel="التالي: الوتيرة اليومية"
+          onBack={() => setStep("content")}
+          onNext={() => setStep("daily-pace")}
+        />
+
+        {goalOpen && (
+          <TargetDateSheet
+            value={targetDate}
+            onClose={() => setGoalOpen(false)}
+            onSave={(iso) => setTargetDate(iso)}
+          />
+        )}
+      </div>
+    )
+  }
+
+  if (step === "daily-pace") {
+    return (
+      <div className="page" style={{ padding: "0 20px" }}>
+        <div style={{ padding: "22px 2px 20px" }}>
+          <div className="eyebrow" style={{ marginBottom: 6 }}>الخطوة الثالثة</div>
+          <h1 style={{ fontFamily: "var(--serif)", fontSize: 27, fontWeight: 700, color: "var(--ink)", lineHeight: 1.3, marginBottom: 10 }}>
+            شكثر تقدر تحفظ يوميًا؟
+          </h1>
+          <p style={{ fontSize: 13.5, lineHeight: 1.85, color: "var(--ink-muted)", maxWidth: "34ch" }}>
+            اختر الوتيرة التي تناسب طاقتك اليومية، وسنوضح لك أثرها على تاريخ الإتمام.
+          </p>
+        </div>
+
+        <div className="card" style={{ padding: "20px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {[
+              { value: "0.5" as const, label: "نصف صفحة يوميًا" },
+              { value: "1" as const, label: "صفحة يوميًا" },
+              { value: "2" as const, label: "صفحتان يوميًا" },
+              { value: "custom" as const, label: "مخصص" },
+            ].map((option) => {
+              const selected = paceMode === option.value
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setPaceMode(option.value)}
+                  style={{
+                    minHeight: 52,
+                    borderRadius: 14,
+                    border: "none",
+                    background: selected ? "var(--ink)" : "var(--paper-deep)",
+                    color: selected ? "white" : "var(--ink-soft)",
+                    fontSize: 14,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    padding: "0 12px",
+                  }}
+                >
+                  {option.label}
+                </button>
+              )
+            })}
+          </div>
+
+          {paceMode === "custom" && (
+            <div style={{ marginTop: 12 }}>
+              <div className="eyebrow" style={{ marginBottom: 8 }}>عدد الصفحات يوميًا</div>
+              <input
+                type="number"
+                min={0.25}
+                max={10}
+                step={0.25}
+                value={customPace}
+                onChange={(event) => setCustomPace(event.target.value)}
+                style={{
+                  width: "100%", height: 52, borderRadius: 16,
+                  border: "1px solid var(--line)", background: "white",
+                  fontFamily: "var(--serif)", fontSize: 18, fontWeight: 600,
+                  color: "var(--ink)", padding: "0 16px", textAlign: "right", outline: "none",
+                }}
+              />
+              <p style={{ marginTop: 8, fontSize: 12, color: "var(--ink-muted)", lineHeight: 1.7 }}>
+                بين ربع صفحة و10 صفحات يوميًا، مع دعم الكسور مثل 0.25 و0.5 و0.75 و1.5.
+              </p>
+            </div>
+          )}
+        </div>
+
+        <StepActions
+          backLabel="رجوع إلى هدف الإتمام"
+          nextLabel="التالي: ملخص الخطة"
+          onBack={() => setStep("target-date")}
+          onNext={() => setStep("summary")}
+        />
+      </div>
+    )
+  }
+
+  if (step === "summary") {
+    return (
+      <div className="page" style={{ padding: "0 20px" }}>
+        <div style={{ padding: "22px 2px 20px" }}>
+          <div className="eyebrow" style={{ marginBottom: 6 }}>الخطوة الأخيرة</div>
+          <h1 style={{ fontFamily: "var(--serif)", fontSize: 27, fontWeight: 700, color: "var(--ink)", lineHeight: 1.3, marginBottom: 10 }}>
+            خطة حفظك
+          </h1>
+          <p style={{ fontSize: 13.5, lineHeight: 1.85, color: "var(--ink-muted)", maxWidth: "34ch" }}>
+            هذا ملخص اختياراتك قبل إنشاء الخطة. إذا أردت تعديل شيء، ارجع إلى الخطوة السابقة.
+          </p>
+        </div>
+
+        <div className="card" style={{ padding: "22px 20px" }}>
+          <SummaryRow label="المحتوى">
+            <div style={{ display: "grid", gap: 6 }}>
+              {summaryContentItems.map((item) => (
+                <div key={item} style={{ fontSize: 14, color: "var(--ink)" }}>- {item}</div>
+              ))}
+            </div>
+          </SummaryRow>
+          <SummaryRow label="هدف الإتمام" value={formatDateYearAr(targetDate)} />
+          <SummaryRow label="وتيرتك" value={formatDailyPacePages(selectedDailyPacePages)} />
+          <SummaryRow label="إجمالي الخطة" value={`${formatNumberAr(totalPages)} صفحة تقريبًا`} />
+          <SummaryRow label="التقدير الحالي" value={`ستنتهي تقريبًا في ${formatDateYearAr(summary.finishDate)}`} />
+
+          {summary.remainingAmount > 0 && !summary.onTrack ? (
+            <div style={{ marginTop: 16, padding: "14px 16px", borderRadius: 16, background: "var(--paper-deep)" }}>
+              <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.8, color: "var(--ink-soft)" }}>
+                بناءً على وتيرتك الحالية، ستنتهي تقريبًا بعد هدفك الحالي بـ {formatNumberAr(afterTargetDays)} يومًا.
+              </p>
+              <p style={{ margin: "10px 0 0", fontSize: 13.5, lineHeight: 1.8, color: "var(--ink-soft)" }}>
+                إذا أردت إنهاء الخطة قبل هدفك الحالي، تحتاج تقريبًا {formatDailyPacePages(summary.requiredDailyAmount)}.
+              </p>
+            </div>
+          ) : (
+            <div style={{ marginTop: 16, padding: "14px 16px", borderRadius: 16, background: "var(--gold-soft)" }}>
+              <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.8, color: "var(--gold-deep)", fontWeight: 600 }}>
+                وتيرتك الحالية تكفي لإنهاء الخطة قبل الهدف.
+              </p>
+            </div>
+          )}
+        </div>
+
+        <StepActions
+          backLabel="رجوع إلى الوتيرة"
+          nextLabel="إنشاء الخطة"
+          onBack={() => setStep("daily-pace")}
+          onNext={handleCreate}
+        />
+      </div>
+    )
   }
 
   return (
@@ -408,7 +640,7 @@ export default function OnboardingPage() {
       }}>
         <button
           type="button"
-          onClick={handleCreate}
+          onClick={() => canCreate && setStep("target-date")}
           disabled={!canCreate}
           style={{
             width: "100%", height: 50, borderRadius: 18,
@@ -427,7 +659,7 @@ export default function OnboardingPage() {
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
-                ابدأ بهذه الخطة
+                التالي: هدف الإتمام
               </>
             : "أضف هدفًا لتبدأ"
           }
@@ -506,6 +738,48 @@ function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
       >
         ×
       </button>
+    </div>
+  )
+}
+
+function StepActions({
+  backLabel,
+  nextLabel,
+  onBack,
+  onNext,
+}: {
+  backLabel: string
+  nextLabel: string
+  onBack: () => void
+  onNext: () => void
+}) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 18, paddingBottom: 40 }}>
+      <button
+        type="button"
+        onClick={onBack}
+        className="btn btn-ghost"
+        style={{ height: 48 }}
+      >
+        {backLabel}
+      </button>
+      <button
+        type="button"
+        onClick={onNext}
+        className="btn btn-gold"
+        style={{ height: 48 }}
+      >
+        {nextLabel}
+      </button>
+    </div>
+  )
+}
+
+function SummaryRow({ label, value, children }: { label: string; value?: string; children?: ReactNode }) {
+  return (
+    <div style={{ paddingBottom: 14, marginBottom: 14, borderBottom: "1px solid rgba(33,29,24,0.08)" }}>
+      <div className="eyebrow" style={{ marginBottom: 8 }}>{label}</div>
+      {value ? <div style={{ fontSize: 15, color: "var(--ink)", fontWeight: 600 }}>{value}</div> : children}
     </div>
   )
 }

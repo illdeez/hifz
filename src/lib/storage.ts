@@ -7,6 +7,7 @@ export function getDefaultSettings(): AppSettings {
     dailyMemorizationGoal: 1,
     dailyReviewGoal: 5,
     targetDate: "2027-02-07",
+    dailyPacePages: 0.5,
   }
 }
 

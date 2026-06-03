@@ -8,6 +8,7 @@ import { PlanManager } from "@/components/plan-manager"
 import { SegmentDraftForm, createInitialSegmentDraft } from "@/components/segment-draft-form"
 import {
   buildPacePlanSummary,
+  formatDailyPacePages,
   getDirectSurahAyahQuickCounts,
   getMemorizationMode,
   isShortSurahPlan,
@@ -27,7 +28,7 @@ import {
   withSessionNote,
   type TodaySessionState,
 } from "@/lib/session-state"
-import { daysUntil, formatDateAr, formatDateFullAr, formatNumberAr, formatYearAr, reviewRelativeLabel, today } from "@/lib/utils"
+import { daysBetween, daysUntil, formatDateAr, formatDateFullAr, formatNumberAr, formatYearAr, reviewRelativeLabel, today } from "@/lib/utils"
 import type { EnrichedSegment, MemorizationPlan, PlanTargetSegment, Rating, SegmentDraft } from "@/lib/types"
 
 const RATING_OPTIONS: Array<{ value: Rating; label: string; hint: string; tone: Rating }> = [
@@ -73,7 +74,7 @@ type QuickRangeOption = {
   tone?: "manual"
 }
 
-type PaceMode = "0.25" | "0.5" | "1" | "2" | "3" | "5" | "10" | "custom"
+type GoalEntryMode = "juz" | "surah" | "segment"
 
 export default function TodayPage() {
   const router = useRouter()
@@ -98,12 +99,11 @@ export default function TodayPage() {
   const [draftError, setDraftError] = useState<string | null>(null)
   const [reviewPickerOpen, setReviewPickerOpen] = useState(false)
   const [selectedGoal, setSelectedGoal] = useState<NewSegmentGoal | null>(null)
+  const [goalEntryMode, setGoalEntryMode] = useState<GoalEntryMode | null>(null)
   const [selectedJuzSurahId, setSelectedJuzSurahId] = useState<number | null>(null)
   const [outsidePlanMode, setOutsidePlanMode] = useState(false)
   const [draftPrepared, setDraftPrepared] = useState(false)
   const [selectedQuickOptionLabel, setSelectedQuickOptionLabel] = useState<string | null>(null)
-  const [paceMode, setPaceMode] = useState<PaceMode>("0.5")
-  const [customPace, setCustomPace] = useState("0.5")
   const [handledDirectLogKey, setHandledDirectLogKey] = useState<string | null>(null)
 
   const daysLeft = daysUntil(store.settings.targetDate)
@@ -111,12 +111,11 @@ export default function TodayPage() {
     todayLog && (todayLog.reviewedSegmentIds.length > 0 || todayLog.addedSegmentIds.length > 0)
   )
   const planSegments = store.activePlan ? allSegments.filter((segment) => isSegmentInsidePlan(segment)) : []
-  const selectedPace = paceMode === "custom" ? Number(customPace) || 0 : Number(paceMode)
   const paceSummary = buildPacePlanSummary({
     activePlan: store.activePlan,
     segments: allSegments,
     targetDate: store.settings.targetDate,
-    dailyPace: selectedPace,
+    dailyPace: store.settings.dailyPacePages,
   })
   const newSegmentGoals = buildNewSegmentGoals(store.activePlan)
   const primaryReviewSegment =
@@ -171,21 +170,6 @@ export default function TodayPage() {
   }, [directAction, directReturnTo, directSource, directSurahId])
 
   useEffect(() => {
-    if (paceSummary.goalUnit === "ayahs") {
-      if (!["3", "5", "10", "custom"].includes(paceMode)) {
-        setPaceMode("5")
-        setCustomPace("5")
-      }
-      return
-    }
-
-    if (!["0.5", "1", "2", "custom"].includes(paceMode)) {
-      setPaceMode("0.5")
-      setCustomPace("0.5")
-    }
-  }, [paceMode, paceSummary.goalUnit])
-
-  useEffect(() => {
     if (!store.activePlan) return
     if (!directLogKey || handledDirectLogKey === directLogKey || session) return
     const surah = getSurahMeta(directSurahId)
@@ -202,6 +186,7 @@ export default function TodayPage() {
     setSession(createTodaySession(todayBuckets, 0, 1, "daily"))
     setUiPhase("engine")
     setSelectedGoal(directGoal)
+    setGoalEntryMode("surah")
     setSelectedJuzSurahId(null)
     setOutsidePlanMode(false)
     setDraftPrepared(false)
@@ -217,6 +202,7 @@ export default function TodayPage() {
     setDraft(createInitialSegmentDraft())
     setDraftError(null)
     setSelectedGoal(null)
+    setGoalEntryMode(null)
     setSelectedJuzSurahId(null)
     setOutsidePlanMode(false)
     setDraftPrepared(false)
@@ -233,6 +219,7 @@ export default function TodayPage() {
     setDraft(createInitialSegmentDraft())
     setDraftError(null)
     setSelectedGoal(null)
+    setGoalEntryMode(null)
     setSelectedJuzSurahId(null)
     setOutsidePlanMode(false)
     setDraftPrepared(false)
@@ -380,6 +367,7 @@ export default function TodayPage() {
   function startOutsidePlanMemorization() {
     setOutsidePlanMode(true)
     setSelectedGoal(null)
+    setGoalEntryMode(null)
     setSelectedJuzSurahId(null)
     setDraft(createInitialSegmentDraft())
     setDraftError(null)
@@ -390,6 +378,7 @@ export default function TodayPage() {
   function returnToPlanGoals() {
     setOutsidePlanMode(false)
     setSelectedGoal(null)
+    setGoalEntryMode(null)
     setSelectedJuzSurahId(null)
     setDraft(createInitialSegmentDraft())
     setDraftError(null)
@@ -468,6 +457,7 @@ export default function TodayPage() {
       newSegmentGoals,
       allSegments,
       selectedGoal,
+      goalEntryMode,
       selectedJuzSurahId,
       outsidePlanMode,
       draftPrepared,
@@ -476,6 +466,7 @@ export default function TodayPage() {
       onAddSegment: handleAddSegmentFromToday,
       onApplyQuickRange: applyQuickRangeOption,
       onChooseGoal: chooseNewSegmentGoal,
+      onChooseGoalEntryMode: setGoalEntryMode,
       onChooseJuzSurah: chooseJuzSurah,
       onStartOutsidePlan: startOutsidePlanMemorization,
       onBackToGoals: returnToPlanGoals,
@@ -612,6 +603,10 @@ export default function TodayPage() {
             planCreatedAt={store.activePlan.createdAt}
             onSetGoal={() => router.push("/settings")}
           />
+        </div>
+
+        <div className="rise" style={{ padding: "18px 20px 0", animationDelay: ".14s" }}>
+          <PaceComparisonCard summary={paceSummary} currentDailyPacePages={store.settings.dailyPacePages} targetDate={store.settings.targetDate} />
         </div>
 
         {/* ── Plan progress strip ──────────────────────────────── */}
@@ -1141,82 +1136,52 @@ function _NextMemorizationCard({
   )
 }
 
-function _PacePlannerCard({
+function PaceComparisonCard({
   summary,
-  paceMode,
-  customPace,
-  onPaceModeChange,
-  onCustomPaceChange,
+  currentDailyPacePages,
+  targetDate,
 }: {
   summary: ReturnType<typeof buildPacePlanSummary>
-  paceMode: PaceMode
-  customPace: string
-  onPaceModeChange: (mode: PaceMode) => void
-  onCustomPaceChange: (value: string) => void
+  currentDailyPacePages: number
+  targetDate: string
 }) {
-  const options: Array<{ value: PaceMode; label: string }> =
-    summary.goalUnit === "ayahs"
-      ? [
-          { value: "3", label: "٣ آيات" },
-          { value: "5", label: "٥ آيات" },
-          { value: "10", label: "١٠ آيات" },
-          { value: "custom", label: "مخصص" },
-        ]
-      : [
-          { value: "0.5", label: "نصف" },
-          { value: "1", label: "صفحة" },
-          { value: "2", label: "صفحتان" },
-          { value: "custom", label: "مخصص" },
-        ]
+  const afterTargetDays = Math.max(0, daysBetween(targetDate, summary.finishDate))
 
   return (
     <div className="surface-card mb-4 p-4">
       <div className="mb-3 flex items-center justify-between gap-2">
         <p className="font-bold text-[var(--ink)]">وتيرة الحفظ</p>
-        <div className="flex items-center gap-1.5">
-          <span className="rounded-lg bg-[var(--paper-deep)] px-2 py-1 text-[11px] font-medium text-[var(--ink-muted)]">
-            {formatNumberAr(summary.remainingAmount)} {summary.goalUnit === "ayahs" ? "آية متبقية" : "صفحة متبقية"}
-          </span>
-          <span className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${summary.onTrack ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
-            {formatPaceLabel(summary.requiredDailyAmount, summary.goalUnit)} مطلوب
-          </span>
+        <span className="rounded-lg bg-[var(--paper-deep)] px-2 py-1 text-[11px] font-medium text-[var(--ink-muted)]">
+          {formatNumberAr(summary.remainingPages)} صفحة متبقية
+        </span>
+      </div>
+
+      <div className="grid gap-3">
+        <div className="rounded-[18px] bg-[var(--paper-deep)] px-4 py-3">
+          <div className="text-xs font-semibold tracking-[0.08em] text-[var(--ink-muted)]">وتيرتك الحالية</div>
+          <div className="mt-2 font-bold text-[var(--ink)]">{formatDailyPacePages(currentDailyPacePages)}</div>
+        </div>
+        <div className="rounded-[18px] bg-[var(--paper-deep)] px-4 py-3">
+          <div className="text-xs font-semibold tracking-[0.08em] text-[var(--ink-muted)]">المطلوب لإنهاء الخطة قبل الهدف</div>
+          <div className="mt-2 font-bold text-[var(--ink)]">{formatPaceLabel(summary.requiredDailyAmount, "pages")}</div>
         </div>
       </div>
 
-      <div className={`mb-3 grid gap-1.5 ${summary.goalUnit === "ayahs" ? "grid-cols-4" : "grid-cols-4"}`}>
-        {options.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            onClick={() => onPaceModeChange(option.value)}
-            className={`rounded-xl py-2.5 text-sm font-bold ${
-              paceMode === option.value ? "text-white" : "bg-[var(--paper-deep)] text-[var(--ink-soft)]"
-            }`}
-            style={paceMode === option.value ? { background: "var(--verdant)" } : {}}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
-
-      {paceMode === "custom" && (
-        <div className="mb-3">
-          <input
-            type="number"
-            min={summary.goalUnit === "ayahs" ? 1 : 0.25}
-            step={summary.goalUnit === "ayahs" ? 1 : 0.25}
-            value={customPace}
-            onChange={(event) => onCustomPaceChange(event.target.value)}
-            placeholder={summary.goalUnit === "ayahs" ? "عدد الآيات يوميًا" : "عدد الصفحات يوميًا"}
-            className="w-full rounded-2xl border border-stone-200 bg-stone-50 px-4 py-2.5 text-sm text-stone-800 outline-none"
-          />
-        </div>
-      )}
-
-      <div className={`rounded-[18px] px-3.5 py-2.5 text-sm font-medium leading-6 ${summary.onTrack ? "bg-emerald-50 text-emerald-900" : "bg-amber-50 text-amber-900"}`}>
-        {summary.remainingAmount === 0
-          ? "الخطة المعروفة مكتملة."
-          : `${formatSelectedPace(summary.selectedDailyAmount, summary.goalUnit)} — تنتهي ${formatDateAr(summary.finishDate)}`}
+      <div className={`mt-3 rounded-[18px] px-4 py-3 text-sm leading-7 ${summary.onTrack ? "bg-emerald-50 text-emerald-900" : "bg-amber-50 text-amber-900"}`}>
+        {summary.remainingAmount === 0 ? (
+          "الخطة المعروفة مكتملة."
+        ) : summary.onTrack ? (
+          <>
+            <div className="font-semibold">وتيرتك الحالية تكفي لإنهاء الخطة قبل الهدف.</div>
+            <div className="mt-1">ومن المتوقع أن تنتهي تقريبًا في: {formatDateAr(summary.finishDate)}</div>
+          </>
+        ) : (
+          <>
+            <div>بناءً على هذه الوتيرة، ستنتهي تقريبًا في: {formatDateAr(summary.finishDate)}</div>
+            <div className="mt-1">أي بعد هدفك الحالي بـ {formatNumberAr(afterTargetDays)} يومًا.</div>
+            <div className="mt-1">إذا أردت إنهاء الخطة قبل هدفك الحالي، تحتاج تقريبًا {formatPaceLabel(summary.requiredDailyAmount, "pages")}.</div>
+          </>
+        )}
       </div>
     </div>
   )
@@ -1345,6 +1310,39 @@ function buildNewSegmentGoals(plan: MemorizationPlan | null): NewSegmentGoal[] {
   })
 
   return [...juzGoals, ...surahGoals, ...segmentGoals]
+}
+
+function buildSurahEntryGoalsFromPlan(goals: NewSegmentGoal[]): Extract<NewSegmentGoal, { type: "surah" }>[] {
+  const surahIds = new Set<number>()
+
+  for (const goal of goals) {
+    if (goal.type === "surah") {
+      surahIds.add(goal.surahId)
+      continue
+    }
+
+    if (goal.type === "juz") {
+      goal.surahIds.forEach((surahId) => surahIds.add(surahId))
+      continue
+    }
+
+    surahIds.add(goal.surahId)
+  }
+
+  return [...surahIds]
+    .sort((a, b) => a - b)
+    .map((surahId) => {
+      const surah = getSurahMeta(surahId)
+      if (!surah) return null
+      return {
+        key: `surah-entry:${surah.id}`,
+        type: "surah" as const,
+        title: `ضمن سورة ${surah.name}`,
+        subtitle: `${formatNumberAr(surah.ayahCount)} آية في السورة`,
+        surahId: surah.id,
+      }
+    })
+    .filter((goal): goal is Extract<NewSegmentGoal, { type: "surah" }> => Boolean(goal))
 }
 
 function getGoalFormConfig(
@@ -1632,6 +1630,14 @@ function describeFullAyahShortcut(goal: NewSegmentGoal, targetSurahId: number | 
   return goal.type === "segment" ? "حفظت المتبقي من المقطع" : `حفظت المتبقي من ${label}`
 }
 
+function describeHalfSegmentShortcut(goal: NewSegmentGoal, targetSurahId: number | null, draft: SegmentDraft | null): string {
+  const range = targetSurahId ? getGoalRange(goal, targetSurahId) : null
+  if (!draft || !range) return "حفظت نصف المقطع"
+
+  const isFullRangeStart = draft.fromAyah === range.fromAyah
+  return isFullRangeStart ? "حفظت نصف المقطع" : "حفظت نصف المقطع المتبقي"
+}
+
 function describeMediumFractionShortcut(
   goal: NewSegmentGoal,
   targetSurahId: number | null,
@@ -1808,8 +1814,49 @@ function buildQuickRangeOptions(
 
   const remaining = getFirstUncoveredBlock(allSegments, range.surahId, range.fromAyah, range.toAyah)
   const suggestionStartAyah = remaining?.fromAyah ?? range.fromAyah
-  const memorizationMode =
-    goal.type === "segment" ? "long" : getMemorizationMode(targetSurahId)
+  const memorizationMode = getMemorizationMode(targetSurahId)
+
+  if (goal.type === "segment") {
+    const fullRemainingDraft = remaining
+      ? createSuggestedDraft(range.surahId, remaining.fromAyah, remaining.toAyah)
+      : null
+    const halfSegmentDraft =
+      remaining ? getHalfSegmentDraft(range.surahId, remaining.fromAyah, remaining.toAyah) : null
+    const manualDraft = createSuggestedDraft(
+      range.surahId,
+      suggestionStartAyah,
+      suggestionStartAyah,
+      { memorization: draft.memorization, meaning: draft.meaning, notes: draft.notes ?? "" }
+    )
+
+    const quickOptions: QuickRangeOption[] = [
+      {
+        key: "goal-half-segment",
+        label: describeHalfSegmentShortcut(goal, targetSurahId, halfSegmentDraft),
+        hint: halfSegmentDraft
+          ? `من ${formatNumberAr(halfSegmentDraft.fromAyah)} إلى ${formatNumberAr(halfSegmentDraft.toAyah)}`
+          : "إذا كان المقطع مكتملًا استخدم الخيار اليدوي",
+        draft: halfSegmentDraft,
+      },
+      {
+        key: "goal-full-segment",
+        label: describeFullAyahShortcut(goal, targetSurahId, fullRemainingDraft),
+        hint: remaining
+          ? `من ${formatNumberAr(remaining.fromAyah)} إلى ${formatNumberAr(remaining.toAyah)}`
+          : "هذا المقطع محفوظ حاليًا",
+        draft: fullRemainingDraft,
+      },
+      {
+        key: "goal-manual",
+        label: "اختيار آيات يدوي",
+        hint: "إذا كان حفظك اليوم يختلف عن هذه الاختصارات",
+        draft: { ...manualDraft },
+        tone: "manual" as const,
+      },
+    ]
+
+    return dedupeQuickOptions(quickOptions.filter((option) => option.draft !== null))
+  }
 
   if (memorizationMode === "short") {
     const fullRemainingDraft = remaining
@@ -2189,6 +2236,7 @@ function SessionView({
   newSegmentGoals,
   allSegments,
   selectedGoal,
+  goalEntryMode,
   selectedJuzSurahId,
   outsidePlanMode,
   draftPrepared,
@@ -2197,6 +2245,7 @@ function SessionView({
   onAddSegment,
   onApplyQuickRange,
   onChooseGoal,
+  onChooseGoalEntryMode,
   onChooseJuzSurah,
   onStartOutsidePlan,
   onBackToGoals,
@@ -2223,6 +2272,7 @@ function SessionView({
   newSegmentGoals: NewSegmentGoal[]
   allSegments: EnrichedSegment[]
   selectedGoal: NewSegmentGoal | null
+  goalEntryMode: GoalEntryMode | null
   selectedJuzSurahId: number | null
   outsidePlanMode: boolean
   draftPrepared: boolean
@@ -2231,6 +2281,7 @@ function SessionView({
   onAddSegment: () => void
   onApplyQuickRange: (draft: SegmentDraft | null, selectedLabel?: string) => void
   onChooseGoal: (goal: NewSegmentGoal) => void
+  onChooseGoalEntryMode: (mode: GoalEntryMode | null) => void
   onChooseJuzSurah: (surahId: number) => void
   onStartOutsidePlan: () => void
   onBackToGoals: () => void
@@ -2251,6 +2302,9 @@ function SessionView({
     entrySource,
     entrySurahId
   )
+  const juzEntryGoals = newSegmentGoals.filter((goal): goal is Extract<NewSegmentGoal, { type: "juz" }> => goal.type === "juz")
+  const segmentEntryGoals = newSegmentGoals.filter((goal): goal is Extract<NewSegmentGoal, { type: "segment" }> => goal.type === "segment")
+  const surahEntryGoals = buildSurahEntryGoalsFromPlan(newSegmentGoals)
   const selectedJuzSurahs =
     selectedGoal?.type === "juz"
       ? selectedGoal.surahIds
@@ -2264,7 +2318,8 @@ function SessionView({
           })
           .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
       : []
-  const showPlanGoalChooser = !outsidePlanMode && !selectedGoal
+  const showGoalEntryModeChooser = !outsidePlanMode && !goalEntryMode && !selectedGoal
+  const showPlanGoalChooser = !outsidePlanMode && goalEntryMode !== null && !selectedGoal
   const showJuzSurahChooser = selectedGoal?.type === "juz" && selectedGoal.hasMappedSurahs && selectedJuzSurahId === null
   const showQuickRangeChooser = !outsidePlanMode && Boolean(selectedGoal) && !showJuzSurahChooser && !draftPrepared
   const showDraftForm =
@@ -2401,29 +2456,53 @@ function SessionView({
               اقتراح اليوم: {paceSuggestion} تقريبًا
             </div>
 
-            {showPlanGoalChooser && (
+            {showGoalEntryModeChooser && (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {newSegmentGoals.map((goal) => (
+                {juzEntryGoals.length > 0 && (
                   <button
-                    key={goal.key}
                     type="button"
-                    onClick={() => onChooseGoal(goal)}
-                    style={{
-                      display: "flex", alignItems: "center", justifyContent: "space-between",
-                      width: "100%", padding: "14px 16px",
-                      borderRadius: 16, border: "none", textAlign: "right",
-                      background: "rgba(237,230,214,.07)",
-                      boxShadow: "inset 0 0 0 1px rgba(237,230,214,.12)",
-                      color: "#EDE6D6", cursor: "pointer", fontFamily: "inherit",
-                    }}
+                    onClick={() => onChooseGoalEntryMode("juz")}
+                    style={darkGoalChooserBtn}
                   >
                     <div>
-                      <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{goal.title}</p>
-                      <p style={{ margin: "4px 0 0", fontSize: 12, color: "rgba(237,230,214,.5)" }}>{goal.subtitle}</p>
+                      <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>جزء</p>
+                      <p style={{ margin: "4px 0 0", fontSize: 12, color: "rgba(237,230,214,.5)" }}>
+                        اعرض فقط الأجزاء الموجودة في خطتك الحالية.
+                      </p>
                     </div>
                     <span style={{ color: "rgba(237,230,214,.35)", fontSize: 18 }}>‹</span>
                   </button>
-                ))}
+                )}
+                {surahEntryGoals.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => onChooseGoalEntryMode("surah")}
+                    style={darkGoalChooserBtn}
+                  >
+                    <div>
+                      <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>سورة</p>
+                      <p style={{ margin: "4px 0 0", fontSize: 12, color: "rgba(237,230,214,.5)" }}>
+                        اعرض فقط السور الموجودة في خطتك الحالية.
+                      </p>
+                    </div>
+                    <span style={{ color: "rgba(237,230,214,.35)", fontSize: 18 }}>‹</span>
+                  </button>
+                )}
+                {segmentEntryGoals.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => onChooseGoalEntryMode("segment")}
+                    style={darkGoalChooserBtn}
+                  >
+                    <div>
+                      <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>مقطع</p>
+                      <p style={{ margin: "4px 0 0", fontSize: 12, color: "rgba(237,230,214,.5)" }}>
+                        اعرض فقط المقاطع المخصصة الموجودة في خطتك.
+                      </p>
+                    </div>
+                    <span style={{ color: "rgba(237,230,214,.35)", fontSize: 18 }}>‹</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={onStartOutsidePlan}
@@ -2448,6 +2527,33 @@ function SessionView({
                 >
                   تخطّي الحفظ الجديد اليوم
                 </button>
+              </div>
+            )}
+
+            {showPlanGoalChooser && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <button type="button" onClick={() => onChooseGoalEntryMode(null)} style={darkBackBtn}>
+                  رجوع إلى أنواع الأهداف
+                </button>
+                {(goalEntryMode === "juz"
+                  ? juzEntryGoals
+                  : goalEntryMode === "segment"
+                    ? segmentEntryGoals
+                    : surahEntryGoals
+                ).map((goal) => (
+                  <button
+                    key={goal.key}
+                    type="button"
+                    onClick={() => onChooseGoal(goal)}
+                    style={darkGoalChooserBtn}
+                  >
+                    <div>
+                      <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{goal.title}</p>
+                      <p style={{ margin: "4px 0 0", fontSize: 12, color: "rgba(237,230,214,.5)" }}>{goal.subtitle}</p>
+                    </div>
+                    <span style={{ color: "rgba(237,230,214,.35)", fontSize: 18 }}>‹</span>
+                  </button>
+                ))}
               </div>
             )}
 
@@ -2712,6 +2818,21 @@ const darkBackBtn: React.CSSProperties = {
   display: "inline-block", marginBottom: 16,
   fontSize: 13, fontWeight: 500, color: "rgba(237,230,214,.5)",
   background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit",
+}
+const darkGoalChooserBtn: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  width: "100%",
+  padding: "14px 16px",
+  borderRadius: 16,
+  border: "none",
+  textAlign: "right",
+  background: "rgba(237,230,214,.07)",
+  boxShadow: "inset 0 0 0 1px rgba(237,230,214,.12)",
+  color: "#EDE6D6",
+  cursor: "pointer",
+  fontFamily: "inherit",
 }
 const darkInfoBox: React.CSSProperties = {
   borderRadius: 14, padding: "14px 16px", marginBottom: 16,

@@ -2,7 +2,7 @@ import { buildSelectedAyahRanges } from "./plan-selection"
 import { getSurahMeta } from "./quran-metadata"
 import { getRemainingPlanPages } from "./page-coverage"
 import type { ActivePlan, HifzSegment } from "./types"
-import { addDays, daysBetween, today } from "./utils"
+import { addDays, daysBetween, formatNumberAr, today } from "./utils"
 
 export type PaceOption = 0.25 | 0.5 | 1 | 2
 export type MemorizationMode = "short" | "medium" | "long"
@@ -25,6 +25,21 @@ export type PacePlanSummary = {
 
 const SHORT_SURAH_IDS = new Set([93, 94, 95, 97, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114])
 const MEDIUM_SURAH_MAX_AYAHS = 46
+
+export function clampDailyPacePages(value: number): number {
+  if (!Number.isFinite(value)) return 0.5
+  const clamped = Math.min(10, Math.max(0.25, value))
+  return Math.round(clamped * 4) / 4
+}
+
+export function formatDailyPacePages(value: number): string {
+  const safe = clampDailyPacePages(value)
+  if (safe === 0.25) return "ربع صفحة يوميًا"
+  if (safe === 0.5) return "نصف صفحة يوميًا"
+  if (safe === 1) return "صفحة يوميًا"
+  if (safe === 2) return "صفحتان يوميًا"
+  return `${formatNumberAr(safe)} صفحة يوميًا`
+}
 
 export function getMemorizationMode(surahId: number): MemorizationMode {
   if (SHORT_SURAH_IDS.has(surahId)) return "short"
@@ -116,13 +131,12 @@ export function buildPacePlanSummary({
   dailyPace: number
   todayDate?: string
 }): PacePlanSummary {
-  const representedSurahIds = getPlanRepresentedSurahIds(activePlan)
-  const goalUnit: "pages" | "ayahs" = isShortSurahPlan(representedSurahIds) ? "ayahs" : "pages"
+  const goalUnit: "pages" | "ayahs" = "pages"
   const remainingPages = getRemainingPlanPages(activePlan, segments).length
   const remainingAyahs = getRemainingPlanAyahs(activePlan, segments)
   const remainingDays = Math.max(0, daysBetween(todayDate, targetDate) - 1)
-  const safePace = goalUnit === "ayahs" ? Math.max(1, dailyPace) : Math.max(0.25, dailyPace)
-  const remainingAmount = goalUnit === "ayahs" ? remainingAyahs : remainingPages
+  const safePace = clampDailyPacePages(dailyPace)
+  const remainingAmount = remainingPages
   const divisor = Math.max(remainingDays, 1)
   const requiredDailyPace = remainingAmount === 0 ? 0 : remainingAmount / divisor
   const daysNeeded = remainingAmount === 0 ? 0 : Math.ceil(remainingAmount / safePace)

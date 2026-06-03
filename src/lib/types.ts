@@ -57,6 +57,7 @@ export type AppSettings = {
   dailyMemorizationGoal: number
   dailyReviewGoal: number
   targetDate: string
+  dailyPacePages: number
 }
 
 export type SegmentStatus = "strong" | "medium" | "weak" | "none"
