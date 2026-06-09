@@ -137,7 +137,11 @@ test("validateSegmentDraft rejects reversed ranges and duplicate segments", () =
 })
 
 test("computeSurahProgress summarizes saved segments inside a surah", () => {
-  const summary = computeSurahProgress(2, makeStore())
+  // Use a date where segments are slightly past due so stability decays into "medium" range
+  // s1 nextReview=2026-05-24, s2 nextReview=2026-05-28
+  // At 2026-05-30: s1 is 6 days past due (2-day grace = 4 days decay = -20, eff=50), s2 is 2 days past (within grace, eff=70)
+  // Average = (50+70)/2 = 60 → "medium"
+  const summary = computeSurahProgress(2, makeStore(), "2026-05-30")
 
   assert.equal(summary.memorizedSegments, 2)
   assert.equal(summary.progressPercent, 3)
