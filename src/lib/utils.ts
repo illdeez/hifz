@@ -54,6 +54,24 @@ export function formatYearAr(value: number): string {
   return new Intl.NumberFormat("ar-SA", { useGrouping: false }).format(value)
 }
 
+/** Formats a page count: up to 2 decimals, trailing zeros trimmed (٠٫٥, ٢٫٢٥, ٣). */
+export function formatPagesAr(value: number): string {
+  return new Intl.NumberFormat("ar-SA", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(value)
+}
+
+/**
+ * Describes a page count for the home KPI. Rounds to the nearest quarter page
+ * and renders it numerically (٠٫٧٥، ٤٫٢٥) with a separate صفحة unit — compact
+ * enough to stay prominent on a small tile.
+ */
+export function describePagesAr(value: number): { text: string; unit: string } {
+  const rounded = Math.round(value * 4) / 4
+  return { text: formatPagesAr(rounded), unit: "صفحة" }
+}
+
 export function toArabicNumeral(n: number): string {
   return formatNumberAr(n)
 }

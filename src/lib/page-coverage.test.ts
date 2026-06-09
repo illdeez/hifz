@@ -4,6 +4,7 @@ import assert from "node:assert/strict"
 import {
   PAGE_COUNT,
   getCoveredPages,
+  getFractionalPageCoverage,
   getPagesForJuz,
   getPagesForSegment,
   getPagesForSurah,
@@ -70,6 +71,31 @@ test("getCoveredPages returns unique pages touched by memorized segments", () =>
   ])
 
   assert.deepEqual(covered, [2, 3, 4, 5])
+})
+
+test("getFractionalPageCoverage counts a fully-memorized page as one whole page", () => {
+  // Page 1 holds all 7 ayahs of Al-Fatihah and nothing else.
+  assert.equal(getFractionalPageCoverage([{ surahId: 1, fromAyah: 1, toAyah: 7 }]), 1)
+})
+
+test("getFractionalPageCoverage counts a partial page as its ayah fraction", () => {
+  // 3 of 7 ayahs on page 1.
+  const coverage = getFractionalPageCoverage([{ surahId: 1, fromAyah: 1, toAyah: 3 }])
+  assert.ok(Math.abs(coverage - 3 / 7) < 1e-9)
+})
+
+test("getFractionalPageCoverage sums fractions across multiple pages", () => {
+  // Whole Fatihah (page 1 = 1) plus 3 ayahs of page 1's worth elsewhere.
+  const coverage = getFractionalPageCoverage([
+    { surahId: 1, fromAyah: 1, toAyah: 7 },
+    { surahId: 1, fromAyah: 1, toAyah: 3 },
+  ])
+  // Same page repeated never exceeds 1 per page.
+  assert.equal(coverage, 1)
+})
+
+test("getFractionalPageCoverage returns 0 for empty input", () => {
+  assert.equal(getFractionalPageCoverage([]), 0)
 })
 
 test("getRemainingPlanPages removes fully covered plan ayahs and keeps only remaining pages", () => {

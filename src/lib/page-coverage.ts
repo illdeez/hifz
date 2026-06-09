@@ -4,9 +4,11 @@ import { getJuzMeta } from "./quran-metadata"
 
 const ayahPageMap = new Map<string, number>()
 const surahPagesMap = new Map<number, number[]>()
+const pageAyahCount = new Map<number, number>()
 
 for (const entry of AYAH_PAGE_METADATA) {
   ayahPageMap.set(`${entry.surahId}:${entry.ayah}`, entry.page)
+  pageAyahCount.set(entry.page, (pageAyahCount.get(entry.page) ?? 0) + 1)
 
   if (!surahPagesMap.has(entry.surahId)) {
     surahPagesMap.set(entry.surahId, [])
@@ -110,6 +112,34 @@ export function getCoveredPages(segments: HifzSegment[]): number[] {
       .filter((segment) => segment.memorization > 0)
       .flatMap((segment) => getPagesForSegment(segment.surahId, segment.fromAyah, segment.toAyah))
   )
+}
+
+/**
+ * Fractional page coverage of a set of ayah ranges.
+ * Each page contributes (memorized ayahs on that page / total ayahs on that page),
+ * so a partially-memorized page counts as a fraction rather than a whole page.
+ * Proportional by ayah count — the finest granularity the page metadata supports.
+ */
+export function getFractionalPageCoverage(
+  ranges: { surahId: number; fromAyah: number; toAyah: number }[]
+): number {
+  const memorizedPerPage = new Map<number, number>()
+
+  for (const range of ranges) {
+    for (let ayah = range.fromAyah; ayah <= range.toAyah; ayah += 1) {
+      const page = getAyahPage(range.surahId, ayah)
+      if (page === null) continue
+      memorizedPerPage.set(page, (memorizedPerPage.get(page) ?? 0) + 1)
+    }
+  }
+
+  let total = 0
+  for (const [page, count] of memorizedPerPage) {
+    const pageTotal = pageAyahCount.get(page) ?? count
+    total += pageTotal > 0 ? Math.min(1, count / pageTotal) : 0
+  }
+
+  return total
 }
 
 export function getRemainingPlanPages(activePlan: ActivePlan | null, segments: HifzSegment[]): number[] {

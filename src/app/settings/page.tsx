@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/page-header"
 import { PlanBasketEditor } from "@/components/plan-basket-editor"
 import { TargetDateSheet } from "@/components/target-date-sheet"
 import { clampDailyPacePages, formatDailyPacePages } from "@/lib/pace-planner"
+import { exportBackupAsJSON, validateImportedBackup, getBackupPreview, applyImportedBackup, type HufzBackup, type BackupPreview } from "@/lib/storage"
 import { useKunehStore } from "@/lib/store"
 import { formatDateYearAr, formatNumberAr } from "@/lib/utils"
 
@@ -21,6 +22,9 @@ export default function SettingsPage() {
   const [planNameDraft, setPlanNameDraft] = useState("")
   const [goalOpen, setGoalOpen] = useState(false)
   const [paceOpen, setPaceOpen] = useState(false)
+  const [importPreview, setImportPreview] = useState<{ backup: HufzBackup; preview: BackupPreview } | null>(null)
+  const [importError, setImportError] = useState<string | null>(null)
+  const [importSuccess, setImportSuccess] = useState(false)
 
   const settings = store.settings
   const canReset = resetText.trim() === "تصفير"
@@ -102,7 +106,7 @@ export default function SettingsPage() {
             right={
               <Stepper
                 value={settings.dailyMemorizationGoal}
-                unit="آية"
+                unit="صفحة"
                 onChange={v => updateSettings({ ...settings, dailyMemorizationGoal: v })}
                 min={0} max={10}
               />
@@ -165,25 +169,91 @@ export default function SettingsPage() {
         </div>
       </div>
 
+      {/* Backup */}
+      <div style={{ padding: "18px 20px 0" }}>
+        <div className="eyebrow" style={{ marginBottom: 10, padding: "0 2px" }}>النسخ الاحتياطي</div>
+        <div className="card" style={{ padding: "18px 20px" }}>
+          <div style={{ fontSize: 13.5, color: "var(--ink-muted)", lineHeight: 1.8, marginBottom: 16 }}>
+            بياناتك محفوظة على هذا الجهاز فقط. احرص على تصدير نسخة احتياطية من وقت لآخر.
+          </div>
+
+          {importError && (
+            <div style={{ borderRadius: 14, padding: "12px 16px", marginBottom: 12, background: "var(--due-soft)", fontSize: 13.5, color: "var(--due)", lineHeight: 1.7 }}>
+              {importError}
+            </div>
+          )}
+          {importSuccess && (
+            <div style={{ borderRadius: 14, padding: "12px 16px", marginBottom: 12, background: "var(--verdant-soft)", fontSize: 13.5, color: "var(--verdant)", lineHeight: 1.7 }}>
+              تم استيراد النسخة الاحتياطية بنجاح.
+            </div>
+          )}
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ height: 46, gap: 8 }}
+              onClick={() => {
+                const json = exportBackupAsJSON()
+                const blob = new Blob([json], { type: "application/json" })
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement("a")
+                a.href = url
+                a.download = `hufz-backup-${new Date().toISOString().slice(0, 10)}.json`
+                a.click()
+                URL.revokeObjectURL(url)
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              تصدير البيانات
+            </button>
+            <label
+              className="btn btn-ghost"
+              style={{ height: 46, gap: 8, cursor: "pointer" }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              استيراد نسخة احتياطية
+              <input
+                type="file"
+                accept=".json"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (!file) return
+                  setImportError(null)
+                  setImportSuccess(false)
+                  const reader = new FileReader()
+                  reader.onload = () => {
+                    try {
+                      const parsed = JSON.parse(reader.result as string)
+                      const result = validateImportedBackup(parsed)
+                      if (!result.ok) {
+                        setImportError(result.error)
+                        return
+                      }
+                      const preview = getBackupPreview(result.backup)
+                      setImportPreview({ backup: result.backup, preview })
+                    } catch {
+                      setImportError("تعذر قراءة الملف. تأكد أنه ملف JSON صالح.")
+                    }
+                  }
+                  reader.readAsText(file)
+                  e.target.value = ""
+                }}
+              />
+            </label>
+          </div>
+        </div>
+      </div>
+
       {/* Data */}
       <div style={{ padding: "18px 20px 0" }}>
         <div className="eyebrow" style={{ marginBottom: 10, padding: "0 2px" }}>البيانات</div>
         <div className="card" style={{ padding: "4px 18px" }}>
-          <SettingsRow
-            icon={
-              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--gold-deep)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
-              </svg>
-            }
-            title="بياناتك محفوظة على جهازك"
-            sub="تُحفظ تلقائيًّا · لا تحتاج حسابًا"
-            right={
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--verdant)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="20 6 9 17 4 12"/>
-              </svg>
-            }
-          />
-          <div className="hr" />
           <SettingsRow
             icon={
               <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--due)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
@@ -367,6 +437,65 @@ export default function SettingsPage() {
         </>
       )}
 
+      {/* Import preview confirmation */}
+      {importPreview && (
+        <>
+          <div style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(23,18,13,.34)", backdropFilter: "blur(2px)" }} onClick={() => setImportPreview(null)} />
+          <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 51, background: "var(--surface)", borderRadius: "28px 28px 0 0", boxShadow: "0 -10px 40px -12px rgba(23,18,13,.4)", padding: "10px 20px calc(28px + env(safe-area-inset-bottom,0px))", animation: "sheetUp .42s cubic-bezier(.2,.8,.25,1) both" }}>
+            <div style={{ width: 38, height: 5, borderRadius: 9, background: "var(--line-2)", margin: "0 auto 18px" }} />
+            <div style={{ width: 52, height: 52, borderRadius: "50%", background: "var(--gold-soft)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--gold-deep)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+            </div>
+            <div style={{ fontFamily: "var(--serif)", fontSize: 21, fontWeight: 600, color: "var(--ink)", textAlign: "center" }}>
+              استيراد نسخة احتياطية؟
+            </div>
+            <p style={{ fontSize: 13.5, color: "var(--ink-muted)", margin: "10px auto 0", lineHeight: 1.6, maxWidth: 300, textAlign: "center" }}>
+              سيتم استبدال بياناتك الحالية بالبيانات الموجودة في هذه النسخة. سيتم تصدير نسخة احتياطية من بياناتك الحالية تلقائيًا قبل الاستيراد.
+            </p>
+
+            <div style={{ marginTop: 16, borderRadius: 16, background: "var(--paper-deep)", padding: "14px 18px" }}>
+              <ImportPreviewRow label="الخطة" value={importPreview.preview.planName ?? "لا توجد خطة"} />
+              <ImportPreviewRow label="المقاطع المحفوظة" value={formatNumberAr(importPreview.preview.segmentCount)} />
+              <ImportPreviewRow label="أيام السجل" value={formatNumberAr(importPreview.preview.logCount)} />
+              <ImportPreviewRow label="هدف الإتمام" value={formatDateYearAr(importPreview.preview.targetDate)} />
+              <ImportPreviewRow label="تاريخ التصدير" value={new Date(importPreview.preview.exportedAt).toLocaleDateString("ar-SA")} last />
+            </div>
+
+            <button
+              style={{ width: "100%", height: 52, borderRadius: 16, background: "var(--gold)", color: "white", fontWeight: 700, fontSize: 15, marginTop: 14, border: "none", cursor: "pointer", fontFamily: "inherit" }}
+              onClick={() => {
+                // Safety backup of current data before import
+                const safetyJson = exportBackupAsJSON()
+                const blob = new Blob([safetyJson], { type: "application/json" })
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement("a")
+                a.href = url
+                a.download = `hufz-safety-backup-${new Date().toISOString().slice(0, 10)}.json`
+                a.click()
+                URL.revokeObjectURL(url)
+
+                // Apply the import
+                applyImportedBackup(importPreview.backup)
+                setImportPreview(null)
+                setImportSuccess(true)
+                // Reload after a brief delay so user sees the success message
+                setTimeout(() => window.location.reload(), 800)
+              }}
+            >
+              نعم، استورد النسخة
+            </button>
+            <button
+              style={{ width: "100%", height: 52, borderRadius: 16, background: "transparent", color: "var(--ink-soft)", fontWeight: 600, fontSize: 15, boxShadow: "inset 0 0 0 1px var(--line-2)", border: "none", cursor: "pointer", fontFamily: "inherit", marginTop: 10 }}
+              onClick={() => setImportPreview(null)}
+            >
+              إلغاء
+            </button>
+          </div>
+        </>
+      )}
+
       {/* Quranic close */}
       <div style={{ textAlign: "center", padding: "28px 20px 8px" }}>
         <div style={{ fontFamily: "var(--serif)", fontSize: 17, color: "var(--ink-muted)" }}>{QURANIC_LINE}</div>
@@ -481,7 +610,7 @@ function DailyPaceSheet({
           وتيرة الحفظ اليومية
         </div>
         <p style={{ fontSize: 13, color: "var(--ink-muted)", textAlign: "center", lineHeight: 1.7, margin: "0 auto 16px", maxWidth: 300 }}>
-          اختر الوتيرة التي تناسبك، وسيعرض كُنه أثرها المتوقع على تاريخ الإنجاز.
+          اختر الوتيرة التي تناسبك، وسيعرض حفظ أثرها المتوقع على تاريخ الإنجاز.
         </p>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
@@ -547,5 +676,14 @@ function DailyPaceSheet({
         </div>
       </div>
     </>
+  )
+}
+
+function ImportPreviewRow({ label, value, last = false }: { label: string; value: string; last?: boolean }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: last ? "none" : "1px solid var(--line)" }}>
+      <span style={{ fontSize: 13, color: "var(--ink-muted)" }}>{label}</span>
+      <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>{value}</span>
+    </div>
   )
 }

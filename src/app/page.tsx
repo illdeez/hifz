@@ -14,7 +14,7 @@ import {
   isShortSurahPlan,
   resolveMemorizationEntryGoalUnit,
 } from "@/lib/pace-planner"
-import { getAyahPageMetadata } from "@/lib/page-coverage"
+import { getAyahPageMetadata, getFractionalPageCoverage } from "@/lib/page-coverage"
 import { buildSelectedAyahRanges } from "@/lib/plan-selection"
 import { getJuzMeta, getSurahMeta } from "@/lib/quran-metadata"
 import { useKunehStore } from "@/lib/store"
@@ -24,11 +24,12 @@ import {
   createReviewSessionFromSegments,
   withReviewResult,
   withSegmentAdded,
+  withSegmentsAdded,
   withSegmentDraftStepSkipped,
   withSessionNote,
   type TodaySessionState,
 } from "@/lib/session-state"
-import { daysBetween, daysUntil, formatDateAr, formatDateFullAr, formatNumberAr, formatYearAr, reviewRelativeLabel, today } from "@/lib/utils"
+import { daysBetween, daysUntil, describePagesAr, formatDateAr, formatDateFullAr, formatNumberAr, formatYearAr, reviewRelativeLabel, today } from "@/lib/utils"
 import type { EnrichedSegment, MemorizationPlan, PlanTargetSegment, Rating, SegmentDraft } from "@/lib/types"
 
 const RATING_OPTIONS: Array<{ value: Rating; label: string; hint: string; tone: Rating }> = [
@@ -76,6 +77,14 @@ type QuickRangeOption = {
 
 type GoalEntryMode = "juz" | "surah" | "segment"
 
+type BulkMemorizationIntent = {
+  kind: "surah" | "juz"
+  title: string
+  subtitle: string
+  confirmation: string
+  drafts: SegmentDraft[]
+}
+
 export default function TodayPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -87,6 +96,7 @@ export default function TodayPage() {
     submitRating,
     saveDailyLog,
     addSegment,
+    addSegments,
     allSegments,
     setActivePlan,
     isSegmentInsidePlan,
@@ -100,11 +110,13 @@ export default function TodayPage() {
   const [reviewPickerOpen, setReviewPickerOpen] = useState(false)
   const [selectedGoal, setSelectedGoal] = useState<NewSegmentGoal | null>(null)
   const [goalEntryMode, setGoalEntryMode] = useState<GoalEntryMode | null>(null)
+  const [bulkIntent, setBulkIntent] = useState<BulkMemorizationIntent | null>(null)
   const [selectedJuzSurahId, setSelectedJuzSurahId] = useState<number | null>(null)
   const [outsidePlanMode, setOutsidePlanMode] = useState(false)
   const [draftPrepared, setDraftPrepared] = useState(false)
   const [selectedQuickOptionLabel, setSelectedQuickOptionLabel] = useState<string | null>(null)
   const [handledDirectLogKey, setHandledDirectLogKey] = useState<string | null>(null)
+  const [outsidePlanConfirm, setOutsidePlanConfirm] = useState<{ draft: SegmentDraft; action: "add-to-plan" | "log-only" } | null>(null)
 
   const daysLeft = daysUntil(store.settings.targetDate)
   const hasCompletedTodaySession = Boolean(
@@ -117,7 +129,7 @@ export default function TodayPage() {
     targetDate: store.settings.targetDate,
     dailyPace: store.settings.dailyPacePages,
   })
-  const newSegmentGoals = buildNewSegmentGoals(store.activePlan)
+  const newSegmentGoals = buildNewSegmentGoals(store.activePlan, allSegments)
   const primaryReviewSegment =
     todayBuckets.overdue[0] ?? todayBuckets.due[0] ?? todayBuckets.threatened[0] ?? null
   const nextMemorizationGoal = newSegmentGoals[0] ?? null
@@ -191,6 +203,7 @@ export default function TodayPage() {
     setOutsidePlanMode(false)
     setDraftPrepared(false)
     setSelectedQuickOptionLabel(null)
+    setBulkIntent(null)
     setDraft(createInitialSegmentDraft(surah.id))
     setDraftError(null)
     setHandledDirectLogKey(directLogKey)
@@ -207,6 +220,7 @@ export default function TodayPage() {
     setOutsidePlanMode(false)
     setDraftPrepared(false)
     setSelectedQuickOptionLabel(null)
+    setBulkIntent(null)
   }
 
   function startExtraReview() {
@@ -258,6 +272,7 @@ export default function TodayPage() {
       setOutsidePlanMode(false)
       setDraftPrepared(false)
       setSelectedQuickOptionLabel(null)
+      setBulkIntent(null)
       router.replace(directReturnTo)
       return
     }
@@ -274,6 +289,7 @@ export default function TodayPage() {
       setOutsidePlanMode(false)
       setDraftPrepared(false)
       setSelectedQuickOptionLabel(null)
+      setBulkIntent(null)
       router.replace(directReturnTo)
       return
     }
@@ -284,16 +300,10 @@ export default function TodayPage() {
     setOutsidePlanMode(false)
     setDraftPrepared(false)
     setSelectedQuickOptionLabel(null)
+    setBulkIntent(null)
   }
 
   function handleAddSegmentFromToday() {
-    const result = addSegment(draft)
-    if (!result.ok) {
-      setDraftError(result.error)
-      return
-    }
-
-    setDraftError(null)
     if (store.activePlan) {
       const insideSurahs = Boolean(getSurahPlanReason(draft.surahId))
       const insideSegments = store.activePlan.targetSegments?.some(
@@ -303,21 +313,60 @@ export default function TodayPage() {
           target.toAyah >= draft.toAyah
       )
       if (!insideSurahs && !insideSegments) {
-        setActivePlan({
-          ...store.activePlan,
-          targetSegments: [
-            ...(store.activePlan.targetSegments ?? []),
-            {
-              surahId: draft.surahId,
-              fromAyah: draft.fromAyah,
-              toAyah: draft.toAyah,
-            },
-          ],
-          updatedAt: today(),
-        })
+        // Outside plan — ask user before proceeding
+        setOutsidePlanConfirm({ draft: { ...draft }, action: "add-to-plan" })
+        return
       }
     }
+
+    commitSegmentDraft(false, draft)
+  }
+
+  function commitSegmentDraft(addToPlan: boolean, draftToCommit: SegmentDraft) {
+    const result = addSegment(draftToCommit)
+    if (!result.ok) {
+      setDraftError(result.error)
+      return
+    }
+
+    setDraftError(null)
+    if (addToPlan && store.activePlan) {
+      setActivePlan({
+        ...store.activePlan,
+        targetSegments: [
+          ...(store.activePlan.targetSegments ?? []),
+          {
+            surahId: draftToCommit.surahId,
+            fromAyah: draftToCommit.fromAyah,
+            toAyah: draftToCommit.toAyah,
+          },
+        ],
+        updatedAt: today(),
+      })
+    }
+    setOutsidePlanConfirm(null)
     setSession((current) => (current ? withSegmentAdded(current, result.id) : current))
+  }
+
+  function handleAddBulkSegmentsFromToday() {
+    if (!bulkIntent) return
+
+    const result = addSegments(
+      bulkIntent.drafts.map((segmentDraft) => ({
+        ...segmentDraft,
+        memorization: draft.memorization,
+        meaning: draft.meaning,
+        notes: draft.notes ?? "",
+      }))
+    )
+    if (!result.ok) {
+      setDraftError(result.error)
+      return
+    }
+
+    setDraftError(null)
+    setBulkIntent(null)
+    setSession((current) => (current ? withSegmentsAdded(current, result.ids) : current))
   }
 
   function chooseNewSegmentGoal(goal: NewSegmentGoal) {
@@ -326,6 +375,7 @@ export default function TodayPage() {
     setOutsidePlanMode(false)
     setDraftPrepared(false)
     setSelectedQuickOptionLabel(null)
+    setBulkIntent(null)
 
     if (goal.type === "surah") {
       setDraft(createInitialSegmentDraft(goal.surahId))
@@ -362,6 +412,7 @@ export default function TodayPage() {
     setDraftError(null)
     setDraftPrepared(false)
     setSelectedQuickOptionLabel(null)
+    setBulkIntent(null)
   }
 
   function startOutsidePlanMemorization() {
@@ -373,6 +424,7 @@ export default function TodayPage() {
     setDraftError(null)
     setDraftPrepared(true)
     setSelectedQuickOptionLabel(null)
+    setBulkIntent(null)
   }
 
   function returnToPlanGoals() {
@@ -384,12 +436,14 @@ export default function TodayPage() {
     setDraftError(null)
     setDraftPrepared(false)
     setSelectedQuickOptionLabel(null)
+    setBulkIntent(null)
   }
 
   function applyQuickRangeOption(nextDraft: SegmentDraft | null, selectedLabel?: string) {
     if (!nextDraft) {
       setSelectedQuickOptionLabel(selectedLabel ?? null)
       setDraftPrepared(true)
+      setBulkIntent(null)
       return
     }
 
@@ -397,19 +451,90 @@ export default function TodayPage() {
     setDraftError(null)
     setDraftPrepared(true)
     setSelectedQuickOptionLabel(selectedLabel ?? null)
+    setBulkIntent(null)
+  }
+
+  function prepareFullSurahConfirmation() {
+    if (!selectedGoal) return
+    const targetSurahId =
+      selectedGoal.type === "surah"
+        ? selectedGoal.surahId
+        : selectedGoal.type === "juz"
+        ? selectedJuzSurahId
+        : null
+    if (!targetSurahId) return
+    const surah = getSurahMeta(targetSurahId)
+    if (!surah) return
+
+    setBulkIntent({
+      kind: "surah",
+      title: `سورة ${surah.name}`,
+      subtitle: `${formatNumberAr(surah.ayahCount)} آية`,
+      confirmation: `سيتم تسجيل سورة ${surah.name} كاملة كمحفوظة.`,
+      drafts: [
+        {
+          surahId: targetSurahId,
+          fromAyah: 1,
+          toAyah: surah.ayahCount,
+          memorization: draft.memorization,
+          meaning: draft.meaning,
+          notes: draft.notes ?? "",
+        },
+      ],
+    })
+    setDraftError(null)
+    setDraftPrepared(true)
+    setSelectedQuickOptionLabel("حفظت السورة كاملة")
+  }
+
+  function prepareFullJuzConfirmation() {
+    if (!selectedGoal || selectedGoal.type !== "juz") return
+
+    setBulkIntent({
+      kind: "juz",
+      title: `الجزء ${formatNumberAr(selectedGoal.juzId)}`,
+      subtitle: `${formatNumberAr(selectedGoal.ranges.length)} مقطعًا سيتم إنشاؤها أو تحديثها`,
+      confirmation: `سيتم تسجيل الجزء ${formatNumberAr(selectedGoal.juzId)} كاملًا كمحفوظ.`,
+      drafts: selectedGoal.ranges.map((range) => ({
+        surahId: range.surahId,
+        fromAyah: range.fromAyah,
+        toAyah: range.toAyah,
+        memorization: draft.memorization,
+        meaning: draft.meaning,
+        notes: draft.notes ?? "",
+      })),
+    })
+    setDraftError(null)
+    setDraftPrepared(true)
+    setSelectedQuickOptionLabel(`حفظت الجزء ${formatNumberAr(selectedGoal.juzId)} كاملًا`)
   }
 
   // Derived data for the new HomeQuiet design
-  const ayatToday = useMemo(() => {
+  const pagesToday = useMemo(() => {
     if (!todayLog || !todayLog.addedSegmentIds.length) return 0
-    return todayLog.addedSegmentIds.reduce((sum, id) => {
-      const seg = allSegments.find((s) => s.id === id)
-      return seg ? sum + (seg.toAyah - seg.fromAyah + 1) : sum
-    }, 0)
+    const ranges = todayLog.addedSegmentIds
+      .map((id) => allSegments.find((s) => s.id === id))
+      .filter((s): s is NonNullable<typeof s> => Boolean(s))
+      .map((s) => ({ surahId: s.surahId, fromAyah: s.fromAyah, toAyah: s.toAyah }))
+    return getFractionalPageCoverage(ranges)
   }, [todayLog, allSegments])
 
+  const pagesDisplay = useMemo(() => describePagesAr(pagesToday), [pagesToday])
+
+  const memoGoalProgress = useMemo(() => {
+    const goal = store.settings.dailyMemorizationGoal
+    if (goal <= 0) return { text: "لم تُحدِّد هدفًا يوميًا", accent: false }
+    if (pagesToday <= 0) return { text: "ابدأ وردك اليوم", accent: false }
+    // Base the percentage on the same quarter-rounded value shown in the tile.
+    const roundedPages = Math.round(pagesToday * 4) / 4
+    const percent = Math.round((roundedPages / goal) * 100)
+    if (percent > 100) return { text: "تجاوزت هدفك اليومي", accent: true }
+    if (percent === 100) return { text: "أتممت هدف اليوم", accent: true }
+    return { text: `${formatNumberAr(percent)}٪ من هدفك اليومي`, accent: false }
+  }, [store.settings.dailyMemorizationGoal, pagesToday])
+
   const ringRatio = store.settings.dailyMemorizationGoal > 0
-    ? Math.min(1, ayatToday / store.settings.dailyMemorizationGoal)
+    ? Math.min(1, pagesToday / store.settings.dailyMemorizationGoal)
     : 0
 
   const heroTask = useMemo(() => {
@@ -455,16 +580,21 @@ export default function TodayPage() {
       entrySource: directSource,
       entrySurahId: Number.isFinite(directSurahId) && directSurahId > 0 ? directSurahId : null,
       newSegmentGoals,
+      hasAnyPlanJuzTargets: (store.activePlan?.targetJuz?.length ?? 0) > 0,
       allSegments,
       selectedGoal,
       goalEntryMode,
+      bulkIntent,
       selectedJuzSurahId,
       outsidePlanMode,
       draftPrepared,
       onRate: handleRating,
       onDraftChange: (nextDraft: SegmentDraft) => { setDraft(nextDraft); setDraftError(null) },
       onAddSegment: handleAddSegmentFromToday,
+      onAddBulkSegments: handleAddBulkSegmentsFromToday,
       onApplyQuickRange: applyQuickRangeOption,
+      onChooseFullSurah: prepareFullSurahConfirmation,
+      onChooseFullJuz: prepareFullJuzConfirmation,
       onChooseGoal: chooseNewSegmentGoal,
       onChooseGoalEntryMode: setGoalEntryMode,
       onChooseJuzSurah: chooseJuzSurah,
@@ -474,6 +604,9 @@ export default function TodayPage() {
       onNoteChange: (note: string) => setSession((current) => (current ? withSessionNote(current, note) : current)),
       onFinish: finishSession,
       onClose: closeSession,
+      outsidePlanConfirm,
+      onCommitSegmentDraft: commitSegmentDraft,
+      onCancelOutsidePlanConfirm: () => setOutsidePlanConfirm(null),
     }
 
     return (
@@ -580,37 +713,23 @@ export default function TodayPage() {
         <div className="rise" style={{ padding: "14px 20px 0", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, animationDelay: ".08s" }}>
           <GlanceTile
             icon="spark" tone="gold"
-            big={ayatToday}
+            big={pagesDisplay.text} unit={pagesDisplay.unit}
             label="حُفظ اليوم"
-            sub={`من ${formatNumberAr(store.settings.dailyMemorizationGoal)} آيات`}
+            sub={memoGoalProgress.text}
+            subTone={memoGoalProgress.accent ? "accent" : "muted"}
             onClick={startExtraMemorization}
           />
           <GlanceTile
             icon="repeat" tone="due"
-            big={dueCount}
+            big={formatNumberAr(dueCount)}
             label="مراجعة اليوم"
             sub={dueCount > 0 ? "تحتاج تثبيتًا" : "مستقرّ"}
             onClick={() => router.push("/review")}
           />
         </div>
 
-        {/* ── Goal countdown ───────────────────────────────────── */}
-        <div className="rise" style={{ padding: "18px 20px 0", animationDelay: ".12s" }}>
-          <div className="eyebrow" style={{ marginBottom: 12, padding: "0 4px" }}>المسير حتى الهدف</div>
-          <GoalCountdownCard
-            daysLeft={store.settings.targetDate ? Math.max(1, daysLeft) : null}
-            targetDate={store.settings.targetDate}
-            planCreatedAt={store.activePlan.createdAt}
-            onSetGoal={() => router.push("/settings")}
-          />
-        </div>
-
-        <div className="rise" style={{ padding: "18px 20px 0", animationDelay: ".14s" }}>
-          <PaceComparisonCard summary={paceSummary} currentDailyPacePages={store.settings.dailyPacePages} targetDate={store.settings.targetDate} />
-        </div>
-
         {/* ── Plan progress strip ──────────────────────────────── */}
-        <div className="rise" style={{ padding: "18px 24px 0", animationDelay: ".16s" }}>
+        <div className="rise" style={{ padding: "18px 24px 0", animationDelay: ".12s" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 9 }}>
             <span style={{ fontSize: 13, color: "var(--ink-muted)", fontWeight: 500 }}>تقدّم الخطة</span>
             <span style={{ fontFamily: "var(--serif)", fontSize: 16, fontWeight: 600, color: "var(--gold-deep)" }}>
@@ -620,31 +739,34 @@ export default function TodayPage() {
           <HomePlanBar value={planProgress.planCompletionPercent / 100} />
         </div>
 
+        {/* ── Compact target/pace chip ─────────────────────────── */}
+        {store.settings.targetDate && (
+          <div className="rise" style={{ padding: "14px 24px 0", animationDelay: ".14s" }}>
+            <Link href="/progress" style={{ textDecoration: "none" }}>
+              <div style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "10px 16px", borderRadius: 14,
+                background: paceSummary.onTrack ? "var(--verdant-soft)" : "var(--due-soft)",
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{
+                    width: 7, height: 7, borderRadius: "50%",
+                    background: paceSummary.onTrack ? "var(--verdant)" : "var(--due)",
+                  }} />
+                  <span style={{ fontSize: 13, fontWeight: 600, color: paceSummary.onTrack ? "var(--verdant)" : "var(--due)" }}>
+                    {paceSummary.onTrack ? "وتيرتك كافية" : "الوتيرة تحتاج رفعًا"}
+                  </span>
+                </div>
+                <span style={{ fontSize: 12.5, color: "var(--ink-muted)" }}>
+                  {formatNumberAr(Math.max(1, daysLeft))} يومًا متبقيًا
+                </span>
+              </div>
+            </Link>
+          </div>
+        )}
+
         <div style={{ height: 100 }} />
       </div>
-
-      {/* ── FAB: quick log memorization ─────────────────────── */}
-      <button
-        className="press"
-        onClick={startExtraMemorization}
-        style={{
-          position: "fixed",
-          bottom: "calc(90px + env(safe-area-inset-bottom, 0px))",
-          insetInlineStart: 20,
-          zIndex: 38,
-          height: 52, paddingInline: 18, borderRadius: 17,
-          display: "flex", alignItems: "center", gap: 9,
-          background: "linear-gradient(177deg, #BE9A5E, #A9824A)",
-          color: "#231d12", fontWeight: 600, fontSize: 14,
-          boxShadow: "0 2px 6px rgba(142,108,57,.3), 0 14px 28px -10px rgba(142,108,57,.55)",
-          border: "none", cursor: "pointer", fontFamily: "inherit",
-        }}
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round">
-          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-        </svg>
-        سجّل حفظًا
-      </button>
 
       {reviewPickerOpen && (
         <ReviewPicker
@@ -683,7 +805,7 @@ function HomeCompletedCard({
         <div>
           <div style={{ fontSize: 15.5, fontWeight: 600, color: "var(--ink)" }}>أتممت جلستك اليوم</div>
           <div style={{ fontSize: 12.5, color: "var(--ink-muted)", marginTop: 2 }}>
-            راجعت {reviewed} · أضفت {added}
+            راجعت {formatNumberAr(reviewed)} · أضفت {formatNumberAr(added)}
           </div>
         </div>
       </div>
@@ -821,16 +943,21 @@ function WardCard({
 
 /** 2-stat glance tile used in the two-column row */
 function GlanceTile({
-  icon, tone, big, label, sub, onClick,
+  icon, tone, big, unit, label, sub, subTone = "muted", onClick,
 }: {
   icon: "spark" | "repeat"
   tone: "gold" | "due"
-  big: number
+  big: string
+  unit?: string
   label: string
   sub: string
+  subTone?: "muted" | "accent"
   onClick?: () => void
 }) {
+  // Keep the value on one line even for the widest case (e.g. "٤٫٢٥").
+  const bigFontSize = big.length <= 5 ? 26 : big.length <= 9 ? 20 : 16
   const col = tone === "due" ? "var(--due)" : "var(--gold-deep)"
+  const subColor = subTone === "accent" ? "var(--gold-deep)" : "var(--ink-muted)"
 
   const iconEl = icon === "spark" ? (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={col} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
@@ -851,12 +978,13 @@ function GlanceTile({
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         {iconEl}
-        <span style={{ fontFamily: "var(--serif)", fontSize: 26, fontWeight: 600, color: "var(--ink)" }}>
-          {formatNumberAr(big)}
+        <span style={{ fontFamily: "var(--serif)", fontSize: bigFontSize, fontWeight: 600, color: "var(--ink)", display: "flex", alignItems: "baseline", gap: 4, whiteSpace: "nowrap" }}>
+          {big}
+          {unit && <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink-muted)" }}>{unit}</span>}
         </span>
       </div>
       <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)", marginTop: 10 }}>{label}</div>
-      <div style={{ fontSize: 11.5, color: "var(--ink-muted)", marginTop: 2 }}>{sub}</div>
+      <div style={{ fontSize: 11.5, fontWeight: subTone === "accent" ? 600 : 400, color: subColor, marginTop: 2 }}>{sub}</div>
     </button>
   )
 }
@@ -978,7 +1106,7 @@ function _PlanWorldCardDeprecated({
         <p className="text-[11px] font-semibold tracking-[0.18em] text-emerald-200/72">خطة حفظك الحالية</p>
         <h2 className="mt-3 text-[26px] font-black leading-tight">{planName}</h2>
         <p className="mt-2 max-w-[28ch] text-sm leading-7 text-emerald-100/88">
-          هذا هو عالم حفظك الآن. كل ما في كُنه اليوم يتحرك انطلاقًا من هذه الخطة.
+          هذا هو عالم حفظك الآن. كل ما في حفظ اليوم يتحرك انطلاقًا من هذه الخطة.
         </p>
       </div>
       <div className="grid grid-cols-2 border-t border-white/10">
@@ -1068,7 +1196,7 @@ function _ReviewFocusCard({ segment }: { segment: EnrichedSegment | null }) {
         <p className="text-xs font-semibold tracking-[0.16em] text-[var(--gold-deep)]">ما الذي يحتاج مراجعة؟</p>
         <h3 className="mt-3 text-xl font-black text-[var(--ink)]">لا توجد مراجعة ضاغطة الآن</h3>
         <p className="mt-2 text-sm leading-7 text-[var(--ink-muted)]">
-          المراجعة اليوم هادئة. إذا بدأت الجلسة سيقودك كُنه مباشرة إلى ما يستحق وقتك الآن.
+          المراجعة اليوم هادئة. إذا بدأت الجلسة سيقودك حفظ مباشرة إلى ما يستحق وقتك الآن.
         </p>
       </section>
     )
@@ -1119,7 +1247,7 @@ function _NextMemorizationCard({
         {goal
           ? `${goal.subtitle} اقتراح اليوم: ${paceSuggestion} تقريبًا.`
           : dailyGoal > 0
-            ? `عند بدء الحفظ الجديد، سيقودك كُنه من داخل خطتك الحالية.`
+            ? `عند بدء الحفظ الجديد، سيقودك حفظ من داخل خطتك الحالية.`
             : "يمكنك تشغيل الحفظ الجديد يدويًا حين تريد، حتى لو لم يكن هدفك اليومي مرتفعًا."}
       </p>
       <div className="mt-4 flex flex-wrap gap-2">
@@ -1241,7 +1369,7 @@ function buildTodayHeadline(overdue: number, due: number, threatened: number, ne
 }
 
 function buildTodaySubline(overdue: number, due: number, threatened: number, newGoal: number) {
-  if (overdue > 0) return "كُنه سيبدأ بما تأخر عن وقته، ثم ينقلك بالتدرج إلى المستحق والمهدد قبل أي حفظ جديد."
+  if (overdue > 0) return "سنبدأ بما تأخر عن وقته، ثم ننتقل بالتدرج إلى المستحق والمهدد قبل أي حفظ جديد."
   if (due > 0) return "لا توجد عناصر متأخرة الآن، لذلك الجلسة ستبدأ مباشرة بما استحق وقته داخل خطتك الحالية."
   if (threatened > 0) return "لا يوجد استحقاق صريح اليوم، لكن بعض المقاطع تحتاج مراجعة وقائية حتى يبقى الثبات مرتفعًا."
   if (newGoal > 0) return "المراجعة اليوم خفيفة، لذلك يمكنك التقدم في الحفظ الجديد من داخل خطتك الحالية."
@@ -1258,14 +1386,19 @@ function buildReviewReason(segment: EnrichedSegment) {
   return "هذا المقطع ليس متأخرًا بعد، لكنه مهدد بالضعف إذا تأجل أكثر، لذلك ظهر لك كتنبيه وقائي."
 }
 
-function buildNewSegmentGoals(plan: MemorizationPlan | null): NewSegmentGoal[] {
+function buildNewSegmentGoals(plan: MemorizationPlan | null, allSegments: EnrichedSegment[]): NewSegmentGoal[] {
   if (!plan) return []
 
   const juzGoals = (plan.targetJuz ?? [])
+    .sort((a, b) => a - b)
     .map((juzId) => {
       const juz = getJuzMeta(juzId)
       const surahIds = juz?.surahIds ?? []
       if (!juz) return null
+      const hasRemaining = juz.ranges.some((range) =>
+        Boolean(getFirstUncoveredBlock(allSegments, range.surahId, range.fromAyah, range.toAyah))
+      )
+      if (!hasRemaining) return null
       return {
         key: `juz:${juz.id}`,
         type: "juz" as const,
@@ -1282,6 +1415,7 @@ function buildNewSegmentGoals(plan: MemorizationPlan | null): NewSegmentGoal[] {
   const surahsCoveredByJuz = new Set(juzGoals.flatMap((goal) => goal.surahIds))
 
   const surahGoals = (plan.targetSurahs ?? [])
+    .sort((a, b) => a - b)
     .filter((surahId) => !surahsCoveredByJuz.has(surahId))
     .map((surahId) => {
       const surah = getSurahMeta(surahId)
@@ -1296,7 +1430,9 @@ function buildNewSegmentGoals(plan: MemorizationPlan | null): NewSegmentGoal[] {
     })
     .filter((goal): goal is Extract<NewSegmentGoal, { type: "surah" }> => Boolean(goal))
 
-  const segmentGoals = (plan.targetSegments ?? []).map((target) => {
+  const segmentGoals = [...(plan.targetSegments ?? [])]
+    .sort((a, b) => (a.surahId === b.surahId ? a.fromAyah - b.fromAyah : a.surahId - b.surahId))
+    .map((target) => {
     const surah = getSurahMeta(target.surahId)
     return {
       key: `segment:${target.surahId}:${target.fromAyah}-${target.toAyah}`,
@@ -1307,7 +1443,7 @@ function buildNewSegmentGoals(plan: MemorizationPlan | null): NewSegmentGoal[] {
       fromAyah: target.fromAyah,
       toAyah: target.toAyah,
     }
-  })
+    })
 
   return [...juzGoals, ...surahGoals, ...segmentGoals]
 }
@@ -2234,16 +2370,21 @@ function SessionView({
   entrySource,
   entrySurahId,
   newSegmentGoals,
+  hasAnyPlanJuzTargets,
   allSegments,
   selectedGoal,
   goalEntryMode,
+  bulkIntent,
   selectedJuzSurahId,
   outsidePlanMode,
   draftPrepared,
   onRate,
   onDraftChange,
   onAddSegment,
+  onAddBulkSegments,
   onApplyQuickRange,
+  onChooseFullSurah,
+  onChooseFullJuz,
   onChooseGoal,
   onChooseGoalEntryMode,
   onChooseJuzSurah,
@@ -2253,6 +2394,9 @@ function SessionView({
   onNoteChange,
   onFinish,
   onClose,
+  outsidePlanConfirm,
+  onCommitSegmentDraft,
+  onCancelOutsidePlanConfirm,
 }: {
   session: TodaySessionState
   draft: SegmentDraft
@@ -2270,16 +2414,21 @@ function SessionView({
   entrySource: string | null
   entrySurahId: number | null
   newSegmentGoals: NewSegmentGoal[]
+  hasAnyPlanJuzTargets: boolean
   allSegments: EnrichedSegment[]
   selectedGoal: NewSegmentGoal | null
   goalEntryMode: GoalEntryMode | null
+  bulkIntent: BulkMemorizationIntent | null
   selectedJuzSurahId: number | null
   outsidePlanMode: boolean
   draftPrepared: boolean
   onRate: (segmentId: string, rating: Rating) => void
   onDraftChange: (draft: SegmentDraft) => void
   onAddSegment: () => void
+  onAddBulkSegments: () => void
   onApplyQuickRange: (draft: SegmentDraft | null, selectedLabel?: string) => void
+  onChooseFullSurah: () => void
+  onChooseFullJuz: () => void
   onChooseGoal: (goal: NewSegmentGoal) => void
   onChooseGoalEntryMode: (mode: GoalEntryMode | null) => void
   onChooseJuzSurah: (surahId: number) => void
@@ -2289,6 +2438,9 @@ function SessionView({
   onNoteChange: (note: string) => void
   onFinish: () => void
   onClose: () => void
+  outsidePlanConfirm: { draft: SegmentDraft; action: "add-to-plan" | "log-only" } | null
+  onCommitSegmentDraft: (addToPlan: boolean, draftToCommit: SegmentDraft) => void
+  onCancelOutsidePlanConfirm: () => void
 }) {
   const current = session.reviewQueue[session.reviewIndex]
   const formConfig = getGoalFormConfig(selectedGoal, selectedJuzSurahId, outsidePlanMode)
@@ -2307,23 +2459,29 @@ function SessionView({
   const surahEntryGoals = buildSurahEntryGoalsFromPlan(newSegmentGoals)
   const selectedJuzSurahs =
     selectedGoal?.type === "juz"
-      ? selectedGoal.surahIds
-          .map((surahId) => {
-            const surah = getSurahMeta(surahId)
-            const range = getJuzRangeForSurah(selectedGoal, surahId)
-            if (!surah || !range) return null
-            const remaining = getFirstUncoveredBlock(allSegments, surahId, range.fromAyah, range.toAyah)
+      ? [...selectedGoal.ranges]
+          .sort((a, b) => a.surahId - b.surahId)
+          .map((range) => {
+            const surah = getSurahMeta(range.surahId)
+            if (!surah) return null
+            const remaining = getFirstUncoveredBlock(allSegments, range.surahId, range.fromAyah, range.toAyah)
             if (!remaining) return null
             return { surah, range, remaining }
           })
           .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
       : []
-  const showGoalEntryModeChooser = !outsidePlanMode && !goalEntryMode && !selectedGoal
-  const showPlanGoalChooser = !outsidePlanMode && goalEntryMode !== null && !selectedGoal
-  const showJuzSurahChooser = selectedGoal?.type === "juz" && selectedGoal.hasMappedSurahs && selectedJuzSurahId === null
+  const showBulkConfirmation = Boolean(bulkIntent)
+  const showGoalEntryModeChooser = !showBulkConfirmation && !outsidePlanMode && !goalEntryMode && !selectedGoal
+  const showPlanGoalChooser = !showBulkConfirmation && !outsidePlanMode && goalEntryMode !== null && !selectedGoal
+  const showJuzSurahChooser =
+    !showBulkConfirmation &&
+    selectedGoal?.type === "juz" &&
+    selectedGoal.hasMappedSurahs &&
+    selectedJuzSurahId === null
   const showQuickRangeChooser = !outsidePlanMode && Boolean(selectedGoal) && !showJuzSurahChooser && !draftPrepared
   const showDraftForm =
-    outsidePlanMode || (!showJuzSurahChooser && (draftPrepared || (Boolean(selectedGoal) && quickRangeOptions.length === 0)))
+    !showBulkConfirmation &&
+    (outsidePlanMode || (!showJuzSurahChooser && (draftPrepared || (Boolean(selectedGoal) && quickRangeOptions.length === 0))))
   const totalSteps = session.reviewQueue.length > 0 ? 3 : 2
   const currentStep = session.phase === "review" ? 1 : session.phase === "new-segment" ? 2 : totalSteps
   const reviewCompletionPercent =
@@ -2338,7 +2496,7 @@ function SessionView({
         <SessionCloseBtn onClick={onClose} />
         <div style={{ textAlign: "center" }}>
           <div className="eyebrow" style={{ color: "rgba(190,154,94,.95)" }}>
-            {session.phase === "review" ? "مراجعة" : session.phase === "new-segment" ? "حفظ جديد" : "تأمّل"}
+            {session.phase === "review" ? "المراجعة" : session.phase === "new-segment" ? "الحفظ الجديد" : "إنهاء الورد"}
           </div>
           {session.phase === "review" && session.reviewQueue.length > 0 && (
             <div style={{ fontSize: 11.5, color: "rgba(237,230,214,.5)", marginTop: 3 }}>
@@ -2443,22 +2601,12 @@ function SessionView({
               ماذا حفظت اليوم؟
             </h2>
             <p style={{ margin: "0 0 20px", fontSize: 14, color: "rgba(237,230,214,.55)", lineHeight: 1.7 }}>
-              ابدأ من أهداف خطتك الحالية، وسجّل فقط ما حفظته فعلًا.
+              هذا هو المقطع التالي غير المحفوظ في خطتك. يمكنك تعديل النطاق أو تخطّي الحفظ الجديد.
             </p>
-
-            {/* Pace suggestion */}
-            <div style={{
-              borderRadius: 14, padding: "12px 16px", marginBottom: 20,
-              background: "rgba(176,138,79,.1)",
-              boxShadow: "inset 0 0 0 1px rgba(176,138,79,.2)",
-              fontSize: 14, color: "#D9C9A3",
-            }}>
-              اقتراح اليوم: {paceSuggestion} تقريبًا
-            </div>
 
             {showGoalEntryModeChooser && (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {juzEntryGoals.length > 0 && (
+                {hasAnyPlanJuzTargets && (
                   <button
                     type="button"
                     onClick={() => onChooseGoalEntryMode("juz")}
@@ -2525,7 +2673,7 @@ function SessionView({
                     fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
                   }}
                 >
-                  تخطّي الحفظ الجديد اليوم
+                  تخطَّ الحفظ الجديد
                 </button>
               </div>
             )}
@@ -2554,6 +2702,13 @@ function SessionView({
                     <span style={{ color: "rgba(237,230,214,.35)", fontSize: 18 }}>‹</span>
                   </button>
                 ))}
+                {goalEntryMode === "juz" && juzEntryGoals.length === 0 && (
+                  <div style={darkInfoBox}>
+                    <p style={{ margin: 0, fontSize: 14, color: "rgba(237,230,214,.72)", lineHeight: 1.8 }}>
+                      أتممت جميع الأجزاء الموجودة في خطتك.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 
@@ -2568,6 +2723,15 @@ function SessionView({
                     اختر السورة التي حفظت منها اليوم داخل هذا الجزء.
                   </p>
                 </div>
+                <button type="button" onClick={onChooseFullJuz} style={{ ...darkGoalChooserBtn, marginBottom: 10 }}>
+                  <div>
+                    <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>حفظت الجزء كاملًا</p>
+                    <p style={{ margin: "4px 0 0", fontSize: 12, color: "rgba(237,230,214,.5)" }}>
+                      سجّل جميع نطاقات هذا الجزء كمحفوظة بعد تأكيدك.
+                    </p>
+                  </div>
+                  <span style={{ color: "rgba(237,230,214,.35)", fontSize: 18 }}>‹</span>
+                </button>
                 {selectedJuzSurahs.length > 0 ? (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     {selectedJuzSurahs.map(({ surah, range, remaining }) => (
@@ -2597,7 +2761,7 @@ function SessionView({
                 ) : (
                   <div style={darkInfoBox}>
                     <p style={{ margin: 0, fontSize: 14, color: "rgba(237,230,214,.72)", lineHeight: 1.8 }}>
-                      تم إكمال جميع سور هذا الجزء داخل خطتك.
+                      أتممت جميع السور المتبقية داخل هذا الجزء.
                     </p>
                   </div>
                 )}
@@ -2612,9 +2776,20 @@ function SessionView({
                 <div style={darkInfoBox}>
                   <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#EDE6D6" }}>{selectedGoal?.title}</p>
                   <p style={{ margin: "6px 0 0", fontSize: 13, color: "rgba(237,230,214,.5)", lineHeight: 1.6 }}>
-                    اختر اختصارًا سريعًا أولًا، ثم عدّل الآيات قبل الحفظ.
+                    اختر مقدار ما حفظته اليوم، أو عدّل النطاق يدويًا.
                   </p>
                 </div>
+                {selectedGoal && selectedGoal.type !== "segment" && isFullSurahContext(selectedGoal, selectedJuzSurahId) && (
+                  <button type="button" onClick={onChooseFullSurah} style={{ ...darkGoalChooserBtn, marginBottom: 10 }}>
+                    <div>
+                      <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>حفظت السورة كاملة</p>
+                      <p style={{ margin: "4px 0 0", fontSize: 12, color: "rgba(237,230,214,.5)" }}>
+                        سجّل السورة كاملة ثم قيّم مستوى حفظك ومعانيها.
+                      </p>
+                    </div>
+                    <span style={{ color: "rgba(237,230,214,.35)", fontSize: 18 }}>‹</span>
+                  </button>
+                )}
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   {quickRangeOptions.map((option) => (
                     <button
@@ -2691,6 +2866,100 @@ function SessionView({
                 )}
               </div>
             )}
+
+            {outsidePlanConfirm && (
+              <div style={{
+                position: "fixed", inset: 0, zIndex: 999,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                background: "rgba(0,0,0,.65)", padding: 24,
+              }}>
+                <div style={{
+                  background: "var(--bg-card, #1C1916)", borderRadius: 22,
+                  padding: "28px 24px", maxWidth: 340, width: "100%",
+                  direction: "rtl", textAlign: "center",
+                  border: "1px solid rgba(237,230,214,.12)",
+                }}>
+                  <p className="serif" style={{ fontSize: 18, fontWeight: 600, color: "#F1EAD9", margin: "0 0 8px", lineHeight: 1.6 }}>
+                    هذا المقطع خارج خطتك الحالية
+                  </p>
+                  <p style={{ fontSize: 14, color: "rgba(237,230,214,.55)", margin: "0 0 24px", lineHeight: 1.7 }}>
+                    هل تريد إضافته إلى الخطة؟
+                  </p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <button
+                      className="btn btn-gold btn-block"
+                      onClick={() => onCommitSegmentDraft(true, outsidePlanConfirm.draft)}
+                      style={{ fontSize: 15, padding: "12px 0", borderRadius: 14 }}
+                    >
+                      إضافة إلى الخطة
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onCommitSegmentDraft(false, outsidePlanConfirm.draft)}
+                      style={{
+                        fontSize: 15, padding: "12px 0", borderRadius: 14,
+                        background: "rgba(237,230,214,.08)", color: "#F1EAD9",
+                        border: "1px solid rgba(237,230,214,.15)", cursor: "pointer",
+                      }}
+                    >
+                      تسجيله دون تعديل الخطة
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onCancelOutsidePlanConfirm}
+                      style={{
+                        fontSize: 14, padding: "10px 0",
+                        background: "transparent", color: "rgba(237,230,214,.45)",
+                        border: "none", cursor: "pointer", marginTop: 4,
+                      }}
+                    >
+                      إلغاء
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {showBulkConfirmation && bulkIntent && (
+              <div>
+                <button type="button" onClick={onBackToGoals} style={darkBackBtn}>
+                  رجوع إلى أهداف الخطة
+                </button>
+                <div style={darkInfoBox}>
+                  <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#EDE6D6" }}>{bulkIntent.title}</p>
+                  <p style={{ margin: "6px 0 0", fontSize: 13, color: "rgba(237,230,214,.5)", lineHeight: 1.8 }}>
+                    {bulkIntent.confirmation}
+                  </p>
+                  <p style={{ margin: "10px 0 0", fontSize: 13, color: "rgba(237,230,214,.72)" }}>
+                    سيتم إنشاء/تحديث: {formatNumberAr(bulkIntent.drafts.length)} مقطعًا
+                  </p>
+                  <p style={{ margin: "6px 0 0", fontSize: 12, color: "rgba(237,230,214,.45)" }}>
+                    {bulkIntent.subtitle}
+                  </p>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+                  <DarkDraftLevels
+                    draft={draft}
+                    onChange={onDraftChange}
+                    error={draftError}
+                    submitLabel={bulkIntent.kind === "juz" ? "تأكيد الجزء كاملًا" : "تأكيد السورة كاملة"}
+                    onSubmit={onAddBulkSegments}
+                    onCancel={onBackToGoals}
+                  />
+                </div>
+                {debugRuntime && (
+                  <RuntimeDebugPanel
+                    activePlan={debugRuntimeData.activePlan}
+                    selectedAyahRanges={debugRuntimeData.selectedAyahRanges}
+                    representedSurahIds={debugRuntimeData.representedSurahIds}
+                    isShortSurahPlan={debugRuntimeData.isShortSurahPlan}
+                    goalUnit={goalUnit}
+                    quickRangeLabels={quickRangeOptions.map((option) => option.label)}
+                    selectedQuickOptionLabel={debugRuntimeData.selectedQuickOptionLabel}
+                  />
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -2698,10 +2967,10 @@ function SessionView({
         {session.phase === "summary" && (
           <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", padding: "20px 32px" }}>
             <div className="eyebrow" style={{ color: "rgba(190,154,94,.95)", textAlign: "center", marginBottom: 14 }}>
-              تأمّل اليوم
+              ملاحظة اختيارية
             </div>
             <h1 className="serif" style={{ margin: 0, fontSize: 26, fontWeight: 600, color: "#F1EAD9", textAlign: "center", lineHeight: 1.4 }}>
-              خاطرةٌ تربطك<br />بما حفظت
+              هل تودّ تسجيل<br />خاطرة اليوم؟
             </h1>
             <textarea
               value={session.note}
@@ -2719,20 +2988,9 @@ function SessionView({
                 direction: "rtl",
               }}
             />
-            <div style={{ marginTop: 20, display: "flex", gap: 12 }}>
-              <button
-                style={{
-                  flex: 1, height: 54, borderRadius: 16,
-                  background: "rgba(237,230,214,.08)", color: "#EDE6D6", border: "none",
-                  boxShadow: "inset 0 0 0 1px rgba(237,230,214,.14)",
-                  fontSize: 15, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
-                }}
-                onClick={onFinish}
-              >
-                تخطّي
-              </button>
-              <button className="btn btn-gold" style={{ flex: 1.4, height: 54 }} onClick={onFinish}>
-                أنهِ الجلسة
+            <div style={{ marginTop: 20 }}>
+              <button className="btn btn-gold btn-lg btn-block" onClick={onFinish}>
+                حفظ الورد
               </button>
             </div>
           </div>
@@ -2741,6 +2999,150 @@ function SessionView({
       </div>
     </div>
   )
+}
+
+function DarkDraftLevels({
+  draft,
+  error,
+  submitLabel,
+  onChange,
+  onSubmit,
+  onCancel,
+}: {
+  draft: SegmentDraft
+  error?: string | null
+  submitLabel: string
+  onChange: (draft: SegmentDraft) => void
+  onSubmit: () => void
+  onCancel: () => void
+}) {
+  const levelOptions = [
+    { value: 0 as const, label: "لم يحفظ", tone: "rgba(237,230,214,.28)" },
+    { value: 1 as const, label: "ضعيف", tone: "#C08552" },
+    { value: 2 as const, label: "متوسط", tone: "#C7A86A" },
+    { value: 3 as const, label: "قوي", tone: "#7FA98C" },
+  ]
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      <DarkLevelGroup label="مستوى الحفظ" value={draft.memorization} options={levelOptions} onChange={(value) => onChange({ ...draft, memorization: value })} />
+      <DarkLevelGroup label="مستوى المعاني" value={draft.meaning} options={levelOptions} onChange={(value) => onChange({ ...draft, meaning: value })} />
+      <div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "rgba(237,230,214,.5)", marginBottom: 10, letterSpacing: ".08em" }}>
+          ملاحظة اختيارية
+        </div>
+        <textarea
+          value={draft.notes ?? ""}
+          onChange={(event) => onChange({ ...draft, notes: event.target.value })}
+          rows={4}
+          placeholder="مثال: أحتاج تثبيتًا أكثر"
+          style={{
+            width: "100%",
+            borderRadius: 18,
+            border: "1px solid rgba(237,230,214,.16)",
+            background: "rgba(237,230,214,.05)",
+            color: "#F1EAD9",
+            fontFamily: "var(--serif)",
+            fontSize: 18,
+            lineHeight: 1.8,
+            padding: "16px 18px",
+            resize: "none",
+            direction: "rtl",
+          }}
+        />
+      </div>
+      {error && (
+        <div style={{ borderRadius: 16, padding: "12px 14px", background: "rgba(192,133,82,.12)", color: "#D9C9A3", fontSize: 13.5 }}>
+          {error}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 12 }}>
+        <button type="button" onClick={onCancel} style={darkSecondaryActionBtn}>
+          إلغاء
+        </button>
+        <button type="button" onClick={onSubmit} style={darkPrimaryActionBtn}>
+          {submitLabel}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function DarkLevelGroup({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string
+  value: number
+  options: Array<{ value: 0 | 1 | 2 | 3; label: string; tone: string }>
+  onChange: (value: 0 | 1 | 2 | 3) => void
+}) {
+  return (
+    <div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: "rgba(237,230,214,.5)", marginBottom: 12, letterSpacing: ".08em", textAlign: "right" }}>
+        {label}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12 }}>
+        {options.map((option) => {
+          const selected = option.value === value
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => onChange(option.value)}
+              style={{
+                minHeight: 84,
+                borderRadius: 18,
+                border: "none",
+                background: "rgba(237,230,214,.06)",
+                boxShadow: selected ? `inset 0 0 0 2px ${option.tone}` : "inset 0 0 0 1px rgba(237,230,214,.1)",
+                color: selected ? "#F1EAD9" : "rgba(237,230,214,.65)",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              <span style={{ width: 10, height: 10, borderRadius: "50%", background: option.tone, display: "block" }} />
+              <span style={{ fontSize: 13, fontWeight: 600 }}>{option.label}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+const darkPrimaryActionBtn: React.CSSProperties = {
+  flex: 1.4,
+  height: 54,
+  borderRadius: 16,
+  border: "none",
+  background: "linear-gradient(180deg, rgba(201,162,99,1) 0%, rgba(176,138,79,1) 100%)",
+  color: "#211D18",
+  fontSize: 15,
+  fontWeight: 700,
+  cursor: "pointer",
+  fontFamily: "inherit",
+}
+
+const darkSecondaryActionBtn: React.CSSProperties = {
+  flex: 1,
+  height: 54,
+  borderRadius: 16,
+  background: "rgba(237,230,214,.08)",
+  color: "#EDE6D6",
+  border: "none",
+  boxShadow: "inset 0 0 0 1px rgba(237,230,214,.14)",
+  fontSize: 15,
+  fontWeight: 600,
+  cursor: "pointer",
+  fontFamily: "inherit",
 }
 
 function RuntimeDebugPanel({
@@ -2964,7 +3366,7 @@ function SessionOverviewRow({
   )
 }
 
-// ── SessionDone — spiritual completion moment ────────────────
+// ── SessionDone — calm completion with save confirmation ──────
 function SessionDone({
   reviewedCount,
   addedCount,
@@ -2974,6 +3376,10 @@ function SessionDone({
   addedCount: number
   onHome: () => void
 }) {
+  const summaryLines: string[] = []
+  if (reviewedCount > 0) summaryLines.push(`راجعت ${formatNumberAr(reviewedCount)} ${reviewedCount === 1 ? "مقطعًا" : reviewedCount === 2 ? "مقطعين" : "مقاطع"}`)
+  if (addedCount > 0) summaryLines.push(`أضفت ${formatNumberAr(addedCount)} ${addedCount === 1 ? "مقطعًا جديدًا" : addedCount === 2 ? "مقطعين جديدين" : "مقاطع جديدة"} إلى حفظك`)
+
   return (
     <div style={{
       height: "100%",
@@ -3011,18 +3417,39 @@ function SessionDone({
         </div>
 
         <div className="rise" style={{ animationDelay: ".08s" }}>
-          <div className="eyebrow" style={{ color: "rgba(190,154,94,.95)" }}>تمّت جلسة اليوم</div>
+          <div className="eyebrow" style={{ color: "rgba(190,154,94,.95)" }}>تم حفظ وِرد اليوم</div>
           <h1 className="serif" style={{ margin: "12px 0 0", fontSize: 27, fontWeight: 600, color: "#F1EAD9", lineHeight: 1.35 }}>
-            {addedCount > 0 ? `أضفت ${addedCount} مقاطع جديدة` : "ثبّتّ ما حفظت"}
+            جزاك الله خيرًا
           </h1>
-          <p style={{ margin: "14px auto 0", fontSize: 14, lineHeight: 1.8, color: "rgba(237,230,214,.55)", maxWidth: 280 }}>
-            {reviewedCount > 0 && `راجعت ${reviewedCount} مقاطع. `}
-            سنذكّرك بمراجعتها في وقتها بإذن الله.
+        </div>
+
+        {/* Summary details */}
+        <div className="rise" style={{ marginTop: 28, animationDelay: ".12s", width: "100%", maxWidth: 300 }}>
+          {summaryLines.length > 0 && (
+            <div style={{
+              borderRadius: 18, padding: "16px 20px",
+              background: "rgba(237,230,214,.06)",
+              boxShadow: "inset 0 0 0 1px rgba(237,230,214,.1)",
+              textAlign: "right",
+            }}>
+              {summaryLines.map((line, i) => (
+                <div key={i} style={{
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: i > 0 ? "10px 0 0" : "0",
+                }}>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--gold)", flexShrink: 0 }} />
+                  <span style={{ fontSize: 14, color: "rgba(237,230,214,.75)", lineHeight: 1.7 }}>{line}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <p style={{ margin: "16px auto 0", fontSize: 13.5, lineHeight: 1.8, color: "rgba(237,230,214,.45)", textAlign: "center" }}>
+            ستظهر المراجعة القادمة في وقتها بإذن الله.
           </p>
         </div>
 
         {/* Ornamental du'a */}
-        <div className="rise" style={{ marginTop: 32, animationDelay: ".16s" }}>
+        <div className="rise" style={{ marginTop: 28, animationDelay: ".16s" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 14, justifyContent: "center", width: 160, margin: "0 auto 14px" }}>
             <div style={{ flex: 1, height: 1, background: "linear-gradient(to right, transparent, rgba(176,138,79,.4))" }} />
             <div style={{ width: 6, height: 6, transform: "rotate(45deg)", background: "var(--gold)", opacity: .7 }} />
