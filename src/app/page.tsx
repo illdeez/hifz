@@ -8,6 +8,7 @@ import { PlanManager } from "@/components/plan-manager"
 import { SegmentDraftForm, createInitialSegmentDraft } from "@/components/segment-draft-form"
 import {
   buildPacePlanSummary,
+  clampDailyPacePages,
   formatDailyPacePages,
   getDirectSurahAyahQuickCounts,
   getMemorizationMode,
@@ -133,6 +134,10 @@ export default function TodayPage() {
   const primaryReviewSegment =
     todayBuckets.overdue[0] ?? todayBuckets.due[0] ?? todayBuckets.threatened[0] ?? null
   const nextMemorizationGoal = newSegmentGoals[0] ?? null
+  const nextSuggestion = useMemo(
+    () => buildNextMemorizationSuggestion(nextMemorizationGoal, allSegments, store.settings.dailyPacePages),
+    [nextMemorizationGoal, allSegments, store.settings.dailyPacePages]
+  )
   const directSource = searchParams.get("source")
   const directAction = searchParams.get("action")
   const directSurahId = Number(searchParams.get("surahId") ?? "")
@@ -238,6 +243,22 @@ export default function TodayPage() {
     setOutsidePlanMode(false)
     setDraftPrepared(false)
     setSelectedQuickOptionLabel(null)
+  }
+
+  function startSuggestedMemorization(suggestion: NextMemorizationSuggestion) {
+    // One tap: jump straight into the new-memorization entry with the range
+    // pre-filled — no goal / surah / segment selection screens.
+    setSession(createTodaySession(todayBuckets, 0, 1, "daily"))
+    setUiPhase("engine")
+    setSelectedGoal(suggestion.goal)
+    setGoalEntryMode(suggestion.goal.type)
+    setSelectedJuzSurahId(suggestion.goal.type === "juz" ? suggestion.targetSurahId : null)
+    setOutsidePlanMode(false)
+    setDraft({ ...suggestion.draft })
+    setDraftPrepared(true)
+    setSelectedQuickOptionLabel(suggestion.amountLabel)
+    setBulkIntent(null)
+    setDraftError(null)
   }
 
   function startReviewForSegment(segmentId: string) {
@@ -709,6 +730,28 @@ export default function TodayPage() {
           )}
         </div>
 
+        {/* ── Next memorization — before: الحفظ المقترح اليوم / after: الحفظ القادم ── */}
+        {(nextSuggestion || hasCompletedTodaySession) && (
+          <div className="rise" style={{ padding: "14px 20px 0", animationDelay: ".07s" }}>
+            {nextSuggestion ? (
+              <NextMemorizationCard
+                title={hasCompletedTodaySession ? "الحفظ القادم" : "الحفظ المقترح اليوم"}
+                surahName={nextSuggestion.surahName}
+                fromAyah={nextSuggestion.draft.fromAyah}
+                toAyah={nextSuggestion.draft.toAyah}
+                amountLabel={nextSuggestion.amountLabel}
+                onStart={() => startSuggestedMemorization(nextSuggestion)}
+              />
+            ) : (
+              <div className="card" style={{ padding: "22px 24px", textAlign: "center" }}>
+                <div style={{ fontFamily: "var(--serif)", fontSize: 18, fontWeight: 600, color: "var(--ink)" }}>
+                  أتممت جميع أهداف الحفظ الحالية 🎉
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── Glance row ──────────────────────────────────────── */}
         <div className="rise" style={{ padding: "14px 20px 0", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, animationDelay: ".08s" }}>
           <GlanceTile
@@ -936,6 +979,63 @@ function WardCard({
           <polygon points="5,3 19,12 5,21" />
         </svg>
         ابدأ جلسة اليوم
+      </button>
+    </div>
+  )
+}
+
+/** Suggested next memorization — answers «شنو أحفظ الآن؟» (before today) / «شنو أحفظ القادم؟» (after today) */
+function NextMemorizationCard({
+  title, surahName, fromAyah, toAyah, amountLabel, onStart,
+}: {
+  title: string
+  surahName: string
+  fromAyah: number
+  toAyah: number
+  amountLabel: string
+  onStart: () => void
+}) {
+  const cleanName = surahName.replace(/^ٱل/, "ال")
+
+  return (
+    <div className="card" style={{ padding: "20px 22px 18px" }}>
+      {/* Header row */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--gold-deep)" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
+          <path d="M5 12h14M13 6l6 6-6 6" />
+        </svg>
+        <span className="eyebrow" style={{ color: "var(--gold-deep)" }}>{title}</span>
+      </div>
+
+      {/* Surah name */}
+      <div style={{ textAlign: "center", padding: "2px 0 4px" }}>
+        <span style={{ fontFamily: "var(--serif)", fontSize: 23, fontWeight: 600, color: "var(--ink)" }}>
+          سورة {cleanName}
+        </span>
+      </div>
+
+      {/* Range + amount */}
+      <div className="well" style={{ display: "flex", marginTop: 16, overflow: "hidden" }}>
+        <div style={{ flex: 1, padding: "13px 12px", textAlign: "center" }}>
+          <div style={{ fontSize: 11.5, color: "var(--ink-muted)", marginBottom: 6 }}>الآيات</div>
+          <div style={{ fontFamily: "var(--serif)", fontSize: 20, fontWeight: 600, color: "var(--ink)", lineHeight: 1, whiteSpace: "nowrap" }}>
+            {formatNumberAr(fromAyah)} – {formatNumberAr(toAyah)}
+          </div>
+        </div>
+        <div style={{ width: 1, background: "var(--line-2)" }} />
+        <div style={{ flex: 1, padding: "13px 12px", textAlign: "center" }}>
+          <div style={{ fontSize: 11.5, color: "var(--ink-muted)", marginBottom: 6 }}>المقدار</div>
+          <div style={{ fontFamily: "var(--serif)", fontSize: 20, fontWeight: 600, color: "var(--ink)", lineHeight: 1 }}>
+            {amountLabel}
+          </div>
+        </div>
+      </div>
+
+      <button className="btn btn-gold btn-lg btn-block" style={{ marginTop: 16 }} onClick={onStart}>
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor">
+          <polygon points="5,3 19,12 5,21" />
+        </svg>
+        ابدأ الحفظ
       </button>
     </div>
   )
@@ -1446,6 +1546,104 @@ function buildNewSegmentGoals(plan: MemorizationPlan | null, allSegments: Enrich
     })
 
   return [...juzGoals, ...surahGoals, ...segmentGoals]
+}
+
+type NextMemorizationSuggestion = {
+  goal: NewSegmentGoal
+  targetSurahId: number
+  surahName: string
+  draft: SegmentDraft
+  ayahCount: number
+  amountLabel: string
+  isWholeSurah: boolean
+}
+
+/**
+ * Builds the single "next memorization" suggestion for the home card.
+ * Pure reuse of the existing plan logic — no new engine:
+ *  - newSegmentGoals[0]      → the first uncompleted goal in the user's plan
+ *  - getFirstUncoveredBlock  → the first ayah they haven't memorized yet
+ *  - getMemorizationMode     → short / medium / long classification
+ *  - getHalfPageDraft / getPageSpanDraft → carve a chunk matching the daily pace
+ */
+function buildNextMemorizationSuggestion(
+  goal: NewSegmentGoal | null,
+  allSegments: EnrichedSegment[],
+  dailyPacePages: number
+): NextMemorizationSuggestion | null {
+  if (!goal) return null
+
+  // Resolve the surah we suggest next (for a juz goal, the first surah with remaining ayahs).
+  let targetSurahId: number | null
+  if (goal.type === "juz") {
+    const firstRemaining = goal.ranges.find((range) =>
+      Boolean(getFirstUncoveredBlock(allSegments, range.surahId, range.fromAyah, range.toAyah))
+    )
+    targetSurahId = firstRemaining?.surahId ?? goal.surahIds[0] ?? null
+  } else {
+    targetSurahId = goal.surahId
+  }
+  if (!targetSurahId) return null
+
+  const surah = getSurahMeta(targetSurahId)
+  if (!surah) return null
+
+  const range = getGoalRange(goal, targetSurahId)
+  if (!range) return null
+
+  const remaining = getFirstUncoveredBlock(allSegments, range.surahId, range.fromAyah, range.toAyah)
+  if (!remaining) return null
+
+  const mode = getMemorizationMode(targetSurahId)
+  let draft: SegmentDraft | null = null
+  let amountLabel = ""
+
+  if (mode === "short") {
+    // Short surahs: suggest the whole remaining surah rather than a page fraction.
+    draft = createSuggestedDraft(range.surahId, remaining.fromAyah, remaining.toAyah)
+  } else {
+    // Medium / long surahs: carve a chunk that matches the user's chosen daily pace.
+    const safePace = clampDailyPacePages(dailyPacePages)
+    if (safePace >= 1.5) {
+      draft =
+        getPageSpanDraft(range.surahId, remaining.fromAyah, remaining.toAyah, 2) ??
+        getPageSpanDraft(range.surahId, remaining.fromAyah, remaining.toAyah, 1) ??
+        getHalfPageDraft(range.surahId, remaining.fromAyah, remaining.toAyah)
+      amountLabel = "≈ صفحتان"
+    } else if (safePace >= 0.75) {
+      draft =
+        getPageSpanDraft(range.surahId, remaining.fromAyah, remaining.toAyah, 1) ??
+        getHalfPageDraft(range.surahId, remaining.fromAyah, remaining.toAyah)
+      amountLabel = "≈ صفحة"
+    } else {
+      draft =
+        getHalfPageDraft(range.surahId, remaining.fromAyah, remaining.toAyah) ??
+        getPageSpanDraft(range.surahId, remaining.fromAyah, remaining.toAyah, 1)
+      amountLabel = "≈ نصف صفحة"
+    }
+  }
+
+  // Fall back to the full remaining block if no page-based chunk could be carved.
+  if (!draft) {
+    draft = createSuggestedDraft(range.surahId, remaining.fromAyah, remaining.toAyah)
+  }
+
+  const ayahCount = draft.toAyah - draft.fromAyah + 1
+  const isWholeSurah = draft.fromAyah === 1 && draft.toAyah === surah.ayahCount
+
+  if (mode === "short" || !amountLabel) {
+    amountLabel = isWholeSurah ? "السورة كاملة" : `${formatNumberAr(ayahCount)} آيات تقريبًا`
+  }
+
+  return {
+    goal,
+    targetSurahId,
+    surahName: surah.name,
+    draft,
+    ayahCount,
+    amountLabel,
+    isWholeSurah,
+  }
 }
 
 function buildSurahEntryGoalsFromPlan(goals: NewSegmentGoal[]): Extract<NewSegmentGoal, { type: "surah" }>[] {
