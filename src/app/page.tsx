@@ -133,7 +133,9 @@ export default function TodayPage() {
   const newSegmentGoals = buildNewSegmentGoals(store.activePlan, allSegments)
   const primaryReviewSegment =
     todayBuckets.overdue[0] ?? todayBuckets.due[0] ?? todayBuckets.threatened[0] ?? null
-  const nextMemorizationGoal = newSegmentGoals[0] ?? null
+  // Anchor the suggestion on where the user *actually* is (their most recent
+  // memorized segment), not just the first plan goal — falls back to plan order.
+  const nextMemorizationGoal = pickActiveMemorizationGoal(newSegmentGoals, allSegments)
   const nextSuggestion = useMemo(
     () => buildNextMemorizationSuggestion(nextMemorizationGoal, allSegments, store.settings.dailyPacePages),
     [nextMemorizationGoal, allSegments, store.settings.dailyPacePages]
@@ -741,6 +743,7 @@ export default function TodayPage() {
                 toAyah={nextSuggestion.draft.toAyah}
                 amountLabel={nextSuggestion.amountLabel}
                 onStart={() => startSuggestedMemorization(nextSuggestion)}
+                onChooseOther={startExtraMemorization}
               />
             ) : (
               <div className="card" style={{ padding: "22px 24px", textAlign: "center" }}>
@@ -986,7 +989,7 @@ function WardCard({
 
 /** Suggested next memorization — answers «شنو أحفظ الآن؟» (before today) / «شنو أحفظ القادم؟» (after today) */
 function NextMemorizationCard({
-  title, surahName, fromAyah, toAyah, amountLabel, onStart,
+  title, surahName, fromAyah, toAyah, amountLabel, onStart, onChooseOther,
 }: {
   title: string
   surahName: string
@@ -994,6 +997,7 @@ function NextMemorizationCard({
   toAyah: number
   amountLabel: string
   onStart: () => void
+  onChooseOther: () => void
 }) {
   const cleanName = surahName.replace(/^ٱل/, "ال")
 
@@ -1036,6 +1040,17 @@ function NextMemorizationCard({
           <polygon points="5,3 19,12 5,21" />
         </svg>
         ابدأ الحفظ
+      </button>
+
+      <button
+        onClick={onChooseOther}
+        style={{
+          display: "block", width: "100%", marginTop: 10, padding: "8px",
+          background: "none", border: "none", cursor: "pointer", fontFamily: "inherit",
+          fontSize: 13, fontWeight: 600, color: "var(--ink-muted)",
+        }}
+      >
+        اختيار آخر
       </button>
     </div>
   )
@@ -1546,6 +1561,69 @@ function buildNewSegmentGoals(plan: MemorizationPlan | null, allSegments: Enrich
     })
 
   return [...juzGoals, ...surahGoals, ...segmentGoals]
+}
+
+/** Does this plan goal still have any ayah the user hasn't memorized yet? */
+function goalHasRemaining(goal: NewSegmentGoal, allSegments: EnrichedSegment[]): boolean {
+  if (goal.type === "juz") {
+    return goal.ranges.some((range) =>
+      Boolean(getFirstUncoveredBlock(allSegments, range.surahId, range.fromAyah, range.toAyah))
+    )
+  }
+  if (goal.type === "segment") {
+    return Boolean(getFirstUncoveredBlock(allSegments, goal.surahId, goal.fromAyah, goal.toAyah))
+  }
+  const surah = getSurahMeta(goal.surahId)
+  if (!surah) return false
+  return Boolean(getFirstUncoveredBlock(allSegments, goal.surahId, 1, surah.ayahCount))
+}
+
+/** Does a memorized segment fall inside this plan goal's range? */
+function goalContainsSegment(goal: NewSegmentGoal, segment: EnrichedSegment): boolean {
+  if (goal.type === "juz") {
+    return goal.ranges.some(
+      (range) =>
+        range.surahId === segment.surahId &&
+        segment.fromAyah <= range.toAyah &&
+        segment.toAyah >= range.fromAyah
+    )
+  }
+  if (goal.type === "segment") {
+    return (
+      goal.surahId === segment.surahId &&
+      segment.fromAyah <= goal.toAyah &&
+      segment.toAyah >= goal.fromAyah
+    )
+  }
+  return goal.surahId === segment.surahId
+}
+
+/**
+ * Picks the plan goal the user is *actually* working in: the one containing
+ * their most recently memorized segment (newest `createdAt`), as long as it
+ * still has ayahs left. Walking segments newest-first means a finished goal is
+ * skipped in favour of the next place they actually memorized. Falls back to
+ * plan order when nothing matches — e.g. before the first memorization.
+ */
+function pickActiveMemorizationGoal(
+  goals: NewSegmentGoal[],
+  allSegments: EnrichedSegment[]
+): NewSegmentGoal | null {
+  const remaining = goals.filter((goal) => goalHasRemaining(goal, allSegments))
+  if (remaining.length === 0) return null
+
+  const recentFirst = [...allSegments].sort((a, b) => {
+    if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1
+    if (a.updatedAt !== b.updatedAt) return a.updatedAt < b.updatedAt ? 1 : -1
+    return a.id < b.id ? 1 : -1
+  })
+
+  for (const segment of recentFirst) {
+    const match = remaining.find((goal) => goalContainsSegment(goal, segment))
+    if (match) return match
+  }
+
+  return remaining[0]
 }
 
 type NextMemorizationSuggestion = {
