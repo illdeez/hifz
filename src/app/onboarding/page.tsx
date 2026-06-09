@@ -96,7 +96,7 @@ export default function OnboardingPage() {
             لديك خطة نشطة بالفعل
           </div>
           <p style={{ fontSize: 14, lineHeight: 1.8, color: "var(--ink-muted)", marginBottom: 20 }}>
-            كُنه يعمل الآن على{" "}
+            حفظ يعمل الآن على{" "}
             <span style={{ fontWeight: 600, color: "var(--ink)" }}>{store.activePlan.name}</span>
             . إذا أردت تعديلها، ستجد ذلك من الصفحة الرئيسية أو الإعدادات.
           </p>
@@ -170,7 +170,7 @@ export default function OnboardingPage() {
 
   if (step === "target-date") {
     return (
-      <div className="page" style={{ padding: "0 20px" }}>
+      <div className="page" style={{ paddingInline: 20 }}>
         <div style={{ padding: "22px 2px 20px" }}>
           <div className="eyebrow" style={{ marginBottom: 6 }}>{formatDateFullAr(today())}</div>
           <h1 style={{ fontFamily: "var(--serif)", fontSize: 27, fontWeight: 700, color: "var(--ink)", lineHeight: 1.3, marginBottom: 10 }}>
@@ -214,7 +214,7 @@ export default function OnboardingPage() {
 
   if (step === "daily-pace") {
     return (
-      <div className="page" style={{ padding: "0 20px" }}>
+      <div className="page" style={{ paddingInline: 20 }}>
         <div style={{ padding: "22px 2px 20px" }}>
           <div className="eyebrow" style={{ marginBottom: 6 }}>الخطوة الثالثة</div>
           <h1 style={{ fontFamily: "var(--serif)", fontSize: 27, fontWeight: 700, color: "var(--ink)", lineHeight: 1.3, marginBottom: 10 }}>
@@ -293,7 +293,7 @@ export default function OnboardingPage() {
 
   if (step === "summary") {
     return (
-      <div className="page" style={{ padding: "0 20px" }}>
+      <div className="page" style={{ paddingInline: 20 }}>
         <div style={{ padding: "22px 2px 20px" }}>
           <div className="eyebrow" style={{ marginBottom: 6 }}>الخطوة الأخيرة</div>
           <h1 style={{ fontFamily: "var(--serif)", fontSize: 27, fontWeight: 700, color: "var(--ink)", lineHeight: 1.3, marginBottom: 10 }}>
@@ -346,7 +346,7 @@ export default function OnboardingPage() {
   }
 
   return (
-    <div className="page" style={{ padding: "0 20px" }}>
+    <div className="page" style={{ paddingInline: 20 }}>
 
       {/* ── Page header ── */}
       <div style={{ padding: "22px 2px 20px" }}>

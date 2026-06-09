@@ -1,14 +1,6 @@
 "use client"
 
-/**
- * TargetDateSheet — centered modal popup calendar.
- *
- * Centered via flexbox on a full-screen fixed scrim (no translateX, no RTL issues).
- * Calendar logic ported verbatim from TargetDateSheet in the design handoff.
- * Week starts Saturday. RTL-correct prev/next navigation.
- */
-
-import { useMemo, useState } from "react"
+import { useState } from "react"
 import { formatNumberAr, formatYearAr } from "@/lib/utils"
 
 const MONTHS = [
@@ -55,8 +47,9 @@ function clampFutureDate(d: Date, min: Date): Date {
 }
 
 const NAV_BTN: React.CSSProperties = {
-  width: 36, height: 36, borderRadius: 10,
-  background: "var(--paper-deep)",
+  width: 40, height: 40, borderRadius: 12,
+  background: "var(--surface)",
+  boxShadow: "inset 0 0 0 1px var(--line-2)",
   display: "flex", alignItems: "center", justifyContent: "center",
   border: "none", cursor: "pointer", flexShrink: 0,
 }
@@ -69,15 +62,14 @@ interface Props {
 
 export function TargetDateSheet({ value, onClose, onSave }: Props) {
   const today = startOfDay(new Date())
-  const init = clampFutureDate(startOfDay(
-    value ? new Date(value) : new Date(today.getTime() + 120 * 86400000),
-  ), today)
-  const [sel, setSel] = useState<Date>(init)
-  const [view, setView] = useState<Date>(
-    new Date(init.getFullYear(), init.getMonth(), 1),
+  const init = clampFutureDate(
+    startOfDay(value ? new Date(value) : new Date(today.getTime() + 120 * 86400000)),
+    today,
   )
-  const [yearPickerOpen, setYearPickerOpen] = useState(false)
-  const [monthPickerOpen, setMonthPickerOpen] = useState(false)
+  const [sel, setSel] = useState<Date>(init)
+  const [view, setView] = useState<Date>(new Date(init.getFullYear(), init.getMonth(), 1))
+  const [picking, setPicking] = useState(false)
+  const [pickYear, setPickYear] = useState(init.getFullYear())
 
   const y = view.getFullYear()
   const m = view.getMonth()
@@ -90,38 +82,31 @@ export function TargetDateSheet({ value, onClose, onSave }: Props) {
   while (cells.length % 7) cells.push(null)
 
   const isPast = (d: Date) => d.getTime() < today.getTime()
-  const canPrev = new Date(y, m, 1) > new Date(today.getFullYear(), today.getMonth(), 1)
+  const canPrev = !picking && new Date(y, m, 1) > new Date(today.getFullYear(), today.getMonth(), 1)
   const isSelectedPast = isPast(sel)
+  const minYear = today.getFullYear()
+  const maxYear = minYear + 10
 
   const monthsAway = monthsBetween(today, sel)
   const fmtSel = `${formatNumberAr(sel.getDate())} ${MONTHS[sel.getMonth()]} ${formatYearAr(sel.getFullYear())}`
-  const yearOptions = useMemo(() => Array.from({ length: 5 }, (_, index) => today.getFullYear() + index), [today])
 
   function jump(delta: number) { setView(new Date(y, m + delta, 1)) }
+
+  function openPicker() { setPickYear(y); setPicking(true) }
+
+  function pickMonth(idx: number) {
+    const nextDay = Math.min(sel.getDate(), new Date(pickYear, idx + 1, 0).getDate())
+    const nextDate = clampFutureDate(startOfDay(new Date(pickYear, idx, nextDay)), today)
+    setSel(nextDate)
+    setView(new Date(pickYear, idx, 1))
+    setPicking(false)
+  }
 
   function quick(months: number) {
     const d = startOfDay(new Date(today))
     d.setMonth(d.getMonth() + months)
     setSel(clampFutureDate(d, today))
     setView(new Date(d.getFullYear(), d.getMonth(), 1))
-  }
-
-  function pickYear(nextYear: number) {
-    const nextMonth = view.getMonth()
-    const nextDay = Math.min(sel.getDate(), new Date(nextYear, nextMonth + 1, 0).getDate())
-    const nextDate = clampFutureDate(startOfDay(new Date(nextYear, nextMonth, nextDay)), today)
-    setSel(nextDate)
-    setView(new Date(nextDate.getFullYear(), nextDate.getMonth(), 1))
-    setYearPickerOpen(false)
-  }
-
-  function pickMonth(nextMonth: number) {
-    const nextYear = view.getFullYear()
-    const nextDay = Math.min(sel.getDate(), new Date(nextYear, nextMonth + 1, 0).getDate())
-    const nextDate = clampFutureDate(startOfDay(new Date(nextYear, nextMonth, nextDay)), today)
-    setSel(nextDate)
-    setView(new Date(nextDate.getFullYear(), nextDate.getMonth(), 1))
-    setMonthPickerOpen(false)
   }
 
   function save() {
@@ -138,7 +123,6 @@ export function TargetDateSheet({ value, onClose, onSave }: Props) {
   ]
 
   return (
-    /* Full-screen scrim — flex centres the popup, click-outside closes */
     <div
       style={{
         position: "fixed", inset: 0, zIndex: 60,
@@ -151,7 +135,6 @@ export function TargetDateSheet({ value, onClose, onSave }: Props) {
       }}
       onClick={onClose}
     >
-      {/* Popup card — stopPropagation so clicks inside don't close */}
       <div
         style={{
           width: "100%", maxWidth: 390,
@@ -165,7 +148,7 @@ export function TargetDateSheet({ value, onClose, onSave }: Props) {
         }}
         onClick={e => e.stopPropagation()}
       >
-        {/* ── Header: selected date + distance ─────────────── */}
+        {/* ── Header ─────────────────────────────────────────── */}
         <div style={{ textAlign: "center", marginBottom: 14 }}>
           <div className="eyebrow" style={{ marginBottom: 8 }}>هدف الإتمام</div>
           <div style={{ fontFamily: "var(--serif)", fontSize: 22, fontWeight: 600, color: "var(--ink)" }}>
@@ -174,9 +157,7 @@ export function TargetDateSheet({ value, onClose, onSave }: Props) {
           <div style={{ fontSize: 12.5, color: "var(--gold-deep)", marginTop: 4, fontWeight: 600 }}>
             {monthsAway <= 0
               ? "اليوم"
-              : `على بُعد ${formatNumberAr(monthsAway)} ${
-                  monthsAway === 1 ? "شهر" : monthsAway === 2 ? "شهرين" : "أشهر"
-                } تقريبًا`}
+              : `على بُعد ${formatNumberAr(monthsAway)} ${monthsAway === 1 ? "شهر" : monthsAway === 2 ? "شهرين" : "أشهر"} تقريبًا`}
           </div>
         </div>
 
@@ -200,12 +181,11 @@ export function TargetDateSheet({ value, onClose, onSave }: Props) {
           })}
         </div>
 
-        {/* ── Month switcher ────────────────────────────────── */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-          {/* Prev — visual right in RTL */}
+        {/* ── Month/year nav row ────────────────────────────── */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
           <button
             type="button"
-            style={{ ...NAV_BTN, opacity: canPrev ? 1 : 0.3, cursor: canPrev ? "pointer" : "default" }}
+            style={{ ...NAV_BTN, opacity: canPrev ? 1 : 0.28, cursor: canPrev ? "pointer" : "default" }}
             onClick={() => canPrev && jump(-1)}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
@@ -213,155 +193,170 @@ export function TargetDateSheet({ value, onClose, onSave }: Props) {
             </svg>
           </button>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button
-              type="button"
-              onClick={() => setMonthPickerOpen((open) => !open)}
-              style={{
-                border: "none",
-                background: "var(--paper-deep)",
-                borderRadius: 11,
-                padding: "6px 12px",
-                fontFamily: "var(--serif)",
-                fontSize: 15,
-                fontWeight: 600,
-                color: "var(--ink)",
-                cursor: "pointer",
-              }}
-            >
-              {MONTHS[m]}
-            </button>
-            <button
-              type="button"
-              onClick={() => setYearPickerOpen((open) => !open)}
-              style={{
-                border: "none",
-                background: "var(--paper-deep)",
-                borderRadius: 11,
-                padding: "6px 12px",
-                fontFamily: "var(--serif)",
-                fontSize: 15,
-                fontWeight: 600,
-                color: "var(--ink)",
-                cursor: "pointer",
-              }}
-            >
-              {formatYearAr(y)}
-            </button>
-          </div>
+          {/* Tappable combined label — flips between calendar and picker */}
+          <button
+            type="button"
+            onClick={() => picking ? setPicking(false) : openPicker()}
+            style={{
+              display: "flex", alignItems: "center", gap: 8,
+              padding: "7px 14px", borderRadius: 13,
+              background: picking ? "var(--gold-soft)" : "transparent",
+              boxShadow: picking ? "inset 0 0 0 1px var(--line-gold)" : "none",
+              border: "none", cursor: "pointer",
+              transition: ".2s",
+            }}
+          >
+            <span style={{ fontFamily: "var(--serif)", fontSize: 18, fontWeight: 600, color: "var(--ink)" }}>
+              {MONTHS[m]}{" "}
+              <span style={{ fontVariantNumeric: "tabular-nums" }}>{formatYearAr(y)}</span>
+            </span>
+            <span style={{
+              display: "inline-flex",
+              transform: `rotate(${picking ? -90 : 90}deg)`,
+              transition: "transform .24s cubic-bezier(.2,.8,.25,1)",
+            }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gold-deep)" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+            </span>
+          </button>
 
-          {/* Next — visual left in RTL */}
-          <button type="button" style={NAV_BTN} onClick={() => jump(1)}>
+          <button
+            type="button"
+            style={{ ...NAV_BTN, opacity: picking ? 0.28 : 1, cursor: picking ? "default" : "pointer" }}
+            onClick={() => !picking && jump(1)}
+          >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
               <polyline points="15 18 9 12 15 6" />
             </svg>
           </button>
         </div>
 
-        {monthPickerOpen && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 12 }}>
-            {MONTHS.map((monthName, monthIndex) => {
-              const selectedMonth = monthIndex === m
-              return (
-                <button
-                  key={monthName}
-                  type="button"
-                  onClick={() => pickMonth(monthIndex)}
-                  style={{
-                    minHeight: 40,
-                    borderRadius: 12,
-                    border: "none",
-                    cursor: "pointer",
-                    background: selectedMonth ? "linear-gradient(177deg,#BE9A5E,#A9824A)" : "var(--paper-deep)",
-                    color: selectedMonth ? "#231d12" : "var(--ink)",
-                    fontFamily: "var(--serif)",
-                    fontSize: 14,
-                    fontWeight: 600,
-                    padding: "10px 8px",
-                  }}
-                >
-                  {monthName}
-                </button>
-              )
-            })}
-          </div>
-        )}
-
-        {yearPickerOpen && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 12 }}>
-            {yearOptions.map((year) => {
-              const selectedYear = year === y
-              return (
-                <button
-                  key={year}
-                  type="button"
-                  onClick={() => pickYear(year)}
-                  style={{
-                    height: 40,
-                    borderRadius: 12,
-                    border: "none",
-                    cursor: "pointer",
-                    background: selectedYear ? "linear-gradient(177deg,#BE9A5E,#A9824A)" : "var(--paper-deep)",
-                    color: selectedYear ? "#231d12" : "var(--ink)",
-                    fontFamily: "var(--serif)",
-                    fontSize: 15,
-                    fontWeight: 600,
-                  }}
-                >
-                  {formatYearAr(year)}
-                </button>
-              )
-            })}
-          </div>
-        )}
-
-        {/* ── Weekday header ────────────────────────────────── */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 3 }}>
-          {WEEKDAYS.map((w, i) => (
-            <div key={i} style={{ textAlign: "center", fontSize: 11, fontWeight: 600, color: "var(--ink-faint)", paddingBottom: 5 }}>
-              {w}
-            </div>
-          ))}
-        </div>
-
-        {/* ── Day grid ─────────────────────────────────────── */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3 }}>
-          {cells.map((d, i) => {
-            if (!d) return <div key={i} />
-            const selected = sameDay(d, sel)
-            const isToday = sameDay(d, today)
-            const past = isPast(d)
-            return (
+        {picking ? (
+          /* ── Month + year picker ─────────────────────────── */
+          <div style={{ paddingBottom: 2 }}>
+            {/* Year stepper */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 18, marginBottom: 16 }}>
               <button
                 type="button"
-                key={i}
-                disabled={past}
-                onClick={() => !past && setSel(d)}
-                style={{
-                  aspectRatio: "1",
-                  borderRadius: 9,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontFamily: "var(--serif)", fontSize: 14, fontWeight: 600,
-                  border: "none",
-                  cursor: past ? "default" : "pointer",
-                  background: selected ? "linear-gradient(177deg,#BE9A5E,#A9824A)" : "transparent",
-                  color: selected ? "#231d12" : past ? "var(--ink-faint)" : "var(--ink-soft)",
-                  opacity: past ? 0.35 : 1,
-                  boxShadow: selected
-                    ? "0 4px 12px -6px rgba(142,108,57,.65)"
-                    : isToday
-                    ? "inset 0 0 0 1.5px var(--line-gold)"
-                    : "none",
-                  transition: ".14s",
-                }}
+                style={{ ...NAV_BTN, opacity: pickYear <= minYear ? 0.28 : 1, cursor: pickYear <= minYear ? "default" : "pointer" }}
+                onClick={() => pickYear > minYear && setPickYear(pickYear - 1)}
               >
-                <span style={{ fontVariantNumeric: "tabular-nums" }}>
-                  {formatNumberAr(d.getDate())}
-                </span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
               </button>
-            )
-          })}
-        </div>
+              <div style={{
+                fontFamily: "var(--serif)", fontSize: 26, fontWeight: 700,
+                color: "var(--ink)", minWidth: 88, textAlign: "center",
+                fontVariantNumeric: "tabular-nums",
+              }}>
+                {formatYearAr(pickYear)}
+              </div>
+              <button
+                type="button"
+                style={{ ...NAV_BTN, opacity: pickYear >= maxYear ? 0.28 : 1, cursor: pickYear >= maxYear ? "default" : "pointer" }}
+                onClick={() => pickYear < maxYear && setPickYear(pickYear + 1)}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--ink)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="15 18 9 12 15 6" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Month grid */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+              {MONTHS.map((monthName, idx) => {
+                const isView = idx === m && pickYear === y
+                const hasSel = idx === sel.getMonth() && pickYear === sel.getFullYear()
+                const disabled = pickYear === minYear && idx < today.getMonth()
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => !disabled && pickMonth(idx)}
+                    style={{
+                      position: "relative",
+                      height: 54, borderRadius: 14,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontFamily: "var(--ui)", fontSize: 15, fontWeight: 600,
+                      border: "none",
+                      cursor: disabled ? "default" : "pointer",
+                      background: isView
+                        ? "linear-gradient(177deg,#BE9A5E,#A9824A)"
+                        : disabled ? "transparent" : "var(--surface-2)",
+                      color: isView ? "#231d12" : disabled ? "var(--ink-faint)" : "var(--ink-soft)",
+                      boxShadow: isView
+                        ? "0 6px 16px -8px rgba(142,108,57,.7)"
+                        : disabled ? "none" : "inset 0 0 0 1px var(--line-2)",
+                      opacity: disabled ? 0.45 : 1,
+                      transition: ".16s",
+                    }}
+                  >
+                    {monthName}
+                    {hasSel && !isView && (
+                      <span style={{
+                        position: "absolute", bottom: 8,
+                        width: 5, height: 5, borderRadius: "50%",
+                        background: "var(--gold)",
+                        left: "50%", transform: "translateX(-50%)",
+                      }} />
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* ── Weekday header ────────────────────────────── */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 3 }}>
+              {WEEKDAYS.map((w, i) => (
+                <div key={i} style={{ textAlign: "center", fontSize: 11, fontWeight: 600, color: "var(--ink-faint)", paddingBottom: 5 }}>
+                  {w}
+                </div>
+              ))}
+            </div>
+
+            {/* ── Day grid ──────────────────────────────────── */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3 }}>
+              {cells.map((d, i) => {
+                if (!d) return <div key={i} />
+                const selected = sameDay(d, sel)
+                const isToday = sameDay(d, today)
+                const past = isPast(d)
+                return (
+                  <button
+                    type="button"
+                    key={i}
+                    disabled={past}
+                    onClick={() => !past && setSel(d)}
+                    style={{
+                      aspectRatio: "1",
+                      borderRadius: 12,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontFamily: "var(--serif)", fontSize: 16, fontWeight: 600,
+                      border: "none",
+                      cursor: past ? "default" : "pointer",
+                      background: selected ? "linear-gradient(177deg,#BE9A5E,#A9824A)" : "transparent",
+                      color: selected ? "#231d12" : past ? "var(--ink-faint)" : "var(--ink-soft)",
+                      opacity: past ? 0.4 : 1,
+                      boxShadow: selected
+                        ? "0 6px 16px -8px rgba(142,108,57,.7)"
+                        : isToday ? "inset 0 0 0 1.5px var(--line-gold)" : "none",
+                      transition: ".16s",
+                    }}
+                  >
+                    <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                      {formatNumberAr(d.getDate())}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </>
+        )}
 
         {isSelectedPast && (
           <div style={{ marginTop: 12, textAlign: "center", fontSize: 12.5, color: "var(--due)", fontWeight: 600 }}>

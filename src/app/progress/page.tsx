@@ -5,7 +5,7 @@ import { useMemo } from "react"
 import { Ring, MushafMap, DayGrid, MapLegend } from "@/components/ds"
 import { PageHeader } from "@/components/page-header"
 import { useKunehStore } from "@/lib/store"
-import { formatNumberAr, formatDateAr } from "@/lib/utils"
+import { formatNumberAr } from "@/lib/utils"
 import { buildPacePlanSummary } from "@/lib/pace-planner"
 import { JUZ_RANGES } from "@/lib/juz-ranges"
 import type { HifzSegment } from "@/lib/types"
@@ -37,7 +37,7 @@ export default function ProgressPage() {
     activePlan: store.activePlan,
     segments: Object.values(store.segments),
     targetDate: store.settings.targetDate,
-    dailyPace: 0.5,
+    dailyPace: store.settings.dailyPacePages,
   })
 
   const juzStatus = useMemo(() => computeJuzStatus(rawSegments), [rawSegments])
@@ -132,7 +132,9 @@ export default function ProgressPage() {
                 {onTrack ? "وتيرتك تكفي لهدفك" : "تحتاج وتيرة أعلى قليلًا"}
               </div>
               <div style={{ fontSize: 12.5, color: "var(--ink-muted)", marginTop: 3 }}>
-                الهدف: {formatDateAr(store.settings.targetDate)}
+                {store.settings.targetDate
+                  ? <>يتبقّى <span style={{ fontVariantNumeric: "tabular-nums" }}>{formatNumberAr(paceSummary.remainingDays)}</span> يومًا</>
+                  : "لم تحدّد هدفًا زمنيًّا"}
               </div>
             </div>
           </div>
@@ -146,7 +148,7 @@ export default function ProgressPage() {
               value={paceSummary.remainingAmount === 0 ? "مكتمل" : `${paceLabel(paceSummary.requiredDailyAmount, paceSummary.goalUnit)}`}
               highlight={!onTrack}
             />
-            <PaceCell label="ينتهي" value={paceSummary.remainingAmount === 0 ? "—" : formatDateAr(paceSummary.finishDate)} />
+            <PaceCell label="وتيرتك الآن" value={paceLabel(paceSummary.selectedDailyPace, paceSummary.goalUnit)} />
           </div>
         </div>
       </div>
