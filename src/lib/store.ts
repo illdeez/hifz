@@ -21,6 +21,53 @@ import { buildSegmentId, createEmptyStore, loadStore, resetStoredData, saveStore
 import type { ActivePlan, AppSettings, DailyLog, EnrichedSegment, HifzSegment, KunehStore, Rating, SegmentDraft } from "./types"
 import { today } from "./utils"
 
+export function applySegmentDraftsToStore(
+  store: KunehStore,
+  drafts: SegmentDraft[],
+  todayDate = today()
+): { ok: true; store: KunehStore; ids: string[] } | { ok: false; error: string } {
+  let nextStore = store
+  const ids: string[] = []
+
+  for (const draft of drafts) {
+    const containedIds = Object.values(nextStore.segments)
+      .filter(
+        (segment) =>
+          segment.surahId === draft.surahId &&
+          segment.fromAyah >= draft.fromAyah &&
+          segment.toAyah <= draft.toAyah
+      )
+      .map((segment) => segment.id)
+
+    const filteredSegments = { ...nextStore.segments }
+    containedIds.forEach((id) => {
+      delete filteredSegments[id]
+    })
+
+    const validationStore = {
+      ...nextStore,
+      segments: filteredSegments,
+    }
+
+    const error = validateSegmentDraft(draft, validationStore)
+    if (error) {
+      return { ok: false, error }
+    }
+
+    const segment = createSegmentFromDraft(draft, todayDate)
+    nextStore = {
+      ...nextStore,
+      segments: {
+        ...filteredSegments,
+        [segment.id]: segment,
+      },
+    }
+    ids.push(segment.id)
+  }
+
+  return { ok: true, store: nextStore, ids: [...new Set(ids)] }
+}
+
 export function useKunehStore() {
   const [store, setStore] = useState<KunehStore>(createEmptyStore)
 
@@ -49,21 +96,19 @@ export function useKunehStore() {
   }
 
   function addSegment(draft: SegmentDraft): { ok: true; id: string } | { ok: false; error: string } {
-    const error = validateSegmentDraft(draft, store)
-    if (error) {
-      return { ok: false, error }
-    }
+    const result = applySegmentDraftsToStore(store, [draft], today())
+    if (!result.ok) return result
 
-    const segment = createSegmentFromDraft(draft, today())
-    updateStore((previous) => ({
-      ...previous,
-      segments: {
-        ...previous.segments,
-        [segment.id]: segment,
-      },
-    }))
+    updateStore(() => result.store)
+    return { ok: true, id: result.ids[0] }
+  }
 
-    return { ok: true, id: segment.id }
+  function addSegments(drafts: SegmentDraft[]): { ok: true; ids: string[] } | { ok: false; error: string } {
+    const result = applySegmentDraftsToStore(store, drafts, today())
+    if (!result.ok) return result
+
+    updateStore(() => result.store)
+    return { ok: true, ids: result.ids }
   }
 
   function setActivePlan(plan: ActivePlan) {
@@ -278,6 +323,7 @@ export function useKunehStore() {
     getSegment,
     getSegmentsForSurah,
     addSegment,
+    addSegments,
     updateSegmentLevels,
     submitRating,
     saveDailyLog,
