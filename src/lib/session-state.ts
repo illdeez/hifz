@@ -73,9 +73,13 @@ export function withReviewResult(state: TodaySessionState, segmentId: string, ra
 }
 
 export function withSegmentAdded(state: TodaySessionState, segmentId: string): TodaySessionState {
+  return withSegmentsAdded(state, [segmentId])
+}
+
+export function withSegmentsAdded(state: TodaySessionState, segmentIds: string[]): TodaySessionState {
   return {
     ...state,
-    addedSegmentIds: [...state.addedSegmentIds, segmentId],
+    addedSegmentIds: [...state.addedSegmentIds, ...segmentIds],
     phase: "summary",
   }
 }
